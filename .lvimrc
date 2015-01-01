@@ -1,0 +1,3 @@
+let b:syntastic_c_cflags = '-isystem /usr/include/libnl3'
+let g:syntastic_c_compiler = 'clang'
+
