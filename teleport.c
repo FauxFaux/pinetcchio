@@ -118,7 +118,7 @@ fail:
 int main() {
     int tun = tun_alloc();
     if (tun < 0) {
-        fprintf(stderr, "couldn't create tunnel: %s\n", strerror(errno));
+        perror("couldn't create tunnel");
         return 1;
     }
     sleep(10000);
