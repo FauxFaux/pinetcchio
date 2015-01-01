@@ -28,6 +28,8 @@ static int set_addr(char *dev) {
     }
 
     int ret = -1;
+    struct rtnl_addr *addr = rtnl_addr_alloc();
+    assert(addr);
 
     struct nl_cache *cache = NULL;
     if (rtnl_link_alloc_cache(sk, AF_UNSPEC, &cache)) {
@@ -41,12 +43,9 @@ static int set_addr(char *dev) {
         goto done;
     }
 
-    struct rtnl_addr *addr = rtnl_addr_alloc();
-    assert(addr);
-
     rtnl_addr_set_ifindex(addr, ifindex);
 
-    struct nl_addr *local_addr;
+    struct nl_addr *local_addr = NULL;
     if (nl_addr_parse("192.168.211.2", AF_INET, &local_addr)) {
         perror("local parse");
         goto done;
@@ -64,6 +63,8 @@ static int set_addr(char *dev) {
 
     ret = 0;
 done:
+    rtnl_addr_put(addr);
+    nl_cache_free(cache);
     nl_close(sk);
     nl_socket_free(sk);
 
@@ -101,6 +102,8 @@ static int tun_alloc() {
     if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0) {
         goto sockfail;
     }
+
+    set_addr(ifr.ifr_name);
 
     close(sock);
     return fd;

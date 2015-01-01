@@ -1,5 +1,6 @@
 CC=clang
 CFLAGS=-Weverything -isystem /usr/include/libnl3
+LDLIBS=-lnl-3 -lnl-route-3
 
 all: teleport
 
