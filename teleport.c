@@ -1,3 +1,5 @@
+#define _GNU_SOURCE 1
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,9 +12,11 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 
 #include <linux/if.h>
 #include <linux/if_tun.h>
+#include <sched.h>
 
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
@@ -28,6 +32,9 @@ static int set_addr(char *dev) {
     }
 
     int ret = -1;
+    struct rtnl_link *link = NULL;
+    struct rtnl_link *link_update = NULL;
+
     struct rtnl_addr *addr = rtnl_addr_alloc();
     assert(addr);
 
@@ -61,8 +68,24 @@ static int set_addr(char *dev) {
         goto done;
     }
 
+    link = rtnl_link_get_by_name(cache, "eth0");
+    assert(link);
+
+    link_update = rtnl_link_alloc();
+
+    rtnl_link_set_ns_pid(link_update, getpid());
+
+    printf("trying to move link %s into pid %d", rtnl_link_get_name(link), getpid());
+    int change_ret = rtnl_link_change(sk, link, link_update, 0);
+    if (change_ret < 0) {
+        fprintf(stderr, "teleporting failed: %s\n", nl_geterror(change_ret));
+        goto done;
+    }
+
     ret = 0;
 done:
+    rtnl_link_put(link_update);
+    rtnl_link_put(link);
     rtnl_addr_put(addr);
     nl_cache_free(cache);
     nl_close(sk);
@@ -85,25 +108,31 @@ static int tun_alloc() {
     ifr.ifr_flags = IFF_TAP;
 
     if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
+        perror("set iff");
         goto fail;
     }
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
+        perror("create socket");
         goto fail;
     }
 
     if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+        perror("get status");
         goto sockfail;
     }
 
     ifr.ifr_flags |= IFF_UP;
 
     if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0) {
+        perror("set status");
         goto sockfail;
     }
 
-    set_addr(ifr.ifr_name);
+    if (set_addr(ifr.ifr_name) < 0) {
+        goto sockfail;
+    }
 
     close(sock);
     return fd;
@@ -115,13 +144,33 @@ fail:
     return -1;
 }
 
+static int child_main(void *arg) {
+    int tun = *(int*)arg;
+    printf("%d\n", tun);
+    system("ip r");
+    system("ip a");
+    sleep(10000);
+    return 0;
+}
+
 int main() {
     int tun = tun_alloc();
     if (tun < 0) {
-        perror("couldn't create tunnel");
         return 1;
     }
-    sleep(10000);
+
+    const int stack_size = 1024*1024;
+
+    char *child_stack = malloc(stack_size);
+    pid_t child = clone(child_main, child_stack + stack_size,
+            SIGCHLD | CLONE_NEWNET | CLONE_FILES,
+            &tun);
+    if (child == -1) {
+        perror("clone");
+        return 2;
+    }
+    printf("launched child %d\n", child);
+    waitpid(child, NULL, 0);
     close(tun);
     return 0;
 }
