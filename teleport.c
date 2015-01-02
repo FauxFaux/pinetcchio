@@ -21,28 +21,40 @@
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
 
-static int set_addr(char *dev) {
-    struct nl_sock *sk = nl_socket_alloc();
-    assert(sk);
-
-    if (nl_connect(sk, NETLINK_ROUTE)) {
-        perror("nl_connect");
-        nl_close(sk);
-        return -1;
-    }
-
-    int ret = -1;
+static int teleport_if(
+        struct nl_sock *sk,
+        struct nl_cache *cache,
+        const char *dev,
+        pid_t target_pid) {
     struct rtnl_link *link = NULL;
     struct rtnl_link *link_update = NULL;
+    int ret = -1;
 
-    struct rtnl_addr *addr = rtnl_addr_alloc();
-    assert(addr);
+    link = rtnl_link_get_by_name(cache, dev);
+    assert(link);
 
-    struct nl_cache *cache = NULL;
-    if (rtnl_link_alloc_cache(sk, AF_UNSPEC, &cache)) {
-        perror("alloc_cache");
+    link_update = rtnl_link_alloc();
+    assert(link_update);
+
+    rtnl_link_set_ns_pid(link_update, target_pid);
+
+    int change_ret = rtnl_link_change(sk, link, link_update, 0);
+    if (change_ret < 0) {
+        fprintf(stderr, "teleporting failed: %s\n", nl_geterror(change_ret));
         goto done;
     }
+
+    ret = 0;
+done:
+    rtnl_link_put(link_update);
+    rtnl_link_put(link);
+    return ret;
+}
+
+static int set_addr(struct nl_sock *sk, struct nl_cache *cache, char *dev) {
+    int ret = -1;
+    struct rtnl_addr *addr = rtnl_addr_alloc();
+    assert(addr);
 
     const int ifindex = rtnl_link_name2i(cache, dev);
     if (!ifindex) {
@@ -68,33 +80,13 @@ static int set_addr(char *dev) {
         goto done;
     }
 
-    link = rtnl_link_get_by_name(cache, "eth0");
-    assert(link);
-
-    link_update = rtnl_link_alloc();
-
-    rtnl_link_set_ns_pid(link_update, getpid());
-
-    printf("trying to move link %s into pid %d", rtnl_link_get_name(link), getpid());
-    int change_ret = rtnl_link_change(sk, link, link_update, 0);
-    if (change_ret < 0) {
-        fprintf(stderr, "teleporting failed: %s\n", nl_geterror(change_ret));
-        goto done;
-    }
-
     ret = 0;
 done:
-    rtnl_link_put(link_update);
-    rtnl_link_put(link);
     rtnl_addr_put(addr);
-    nl_cache_free(cache);
-    nl_close(sk);
-    nl_socket_free(sk);
-
     return ret;
 }
 
-static int tun_alloc() {
+static int tun_alloc(struct nl_sock *sk, struct nl_cache *cache) {
     const char *clone_from = "/dev/net/tun";
 
     int fd = open(clone_from, O_RDWR);
@@ -102,6 +94,7 @@ static int tun_alloc() {
         return fd;
     }
 
+    int sock = 0;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(struct ifreq));
 
@@ -112,7 +105,7 @@ static int tun_alloc() {
         goto fail;
     }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
         perror("create socket");
         goto fail;
@@ -120,28 +113,29 @@ static int tun_alloc() {
 
     if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
         perror("get status");
-        goto sockfail;
+        goto fail;
     }
 
     ifr.ifr_flags |= IFF_UP;
 
     if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0) {
         perror("set status");
-        goto sockfail;
+        goto fail;
     }
 
-    if (set_addr(ifr.ifr_name) < 0) {
-        goto sockfail;
+    if (set_addr(sk, cache, ifr.ifr_name) < 0) {
+        perror("set addr");
+        goto fail;
     }
 
-    close(sock);
-    return fd;
-
-sockfail:
-    close(sock);
+    goto done;
 fail:
+    fd = -1;
+
+done:
+    close(sock);
     close(fd);
-    return -1;
+    return fd;
 }
 
 static int child_main(void *arg) {
@@ -154,10 +148,29 @@ static int child_main(void *arg) {
 }
 
 int main() {
-    int tun = tun_alloc();
-    if (tun < 0) {
-        return 1;
+    int ret = 1;
+    struct nl_cache *cache = NULL;
+    struct nl_sock *sk = NULL;
+    int tun = -1;
+
+    sk = nl_socket_alloc();
+    assert(sk);
+
+    if (nl_connect(sk, NETLINK_ROUTE)) {
+        perror("nl_connect");
+        goto done;
     }
+
+    if (rtnl_link_alloc_cache(sk, AF_UNSPEC, &cache)) {
+        perror("alloc_cache");
+        goto done;
+    }
+
+    tun = tun_alloc(sk, cache);
+    if (tun < 0) {
+        goto done;
+    }
+
 
     const int stack_size = 1024*1024;
 
@@ -169,9 +182,23 @@ int main() {
         perror("clone");
         return 2;
     }
+
+    if (teleport_if(sk, cache, "eth0", child) < 0) {
+        return 3;
+    }
+
     printf("launched child %d\n", child);
     waitpid(child, NULL, 0);
+
+    ret = 0;
+done:
     close(tun);
+
+    nl_cache_free(cache);
+    nl_close(sk);
+    nl_socket_free(sk);
+
+
     return 0;
 }
 
