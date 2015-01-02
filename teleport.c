@@ -124,7 +124,6 @@ static int tun_alloc(struct nl_sock *sk, struct nl_cache *cache) {
     }
 
     if (set_addr(sk, cache, ifr.ifr_name) < 0) {
-        perror("set addr");
         goto fail;
     }
 
