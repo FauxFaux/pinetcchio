@@ -186,6 +186,26 @@ done:
     return fd;
 }
 
+static int do_a_copy(int from, int to) {
+#define buf_size 9000
+    char buf[buf_size];
+
+    ssize_t found = read(from, buf, buf_size);
+    printf("found %ld bytes\n", found);
+    if (found < 0) {
+        perror("read from source");
+        return -1;
+    }
+    ssize_t sent = write(to, buf, found);
+    if (sent != found) {
+        perror("write to target");
+        return -2;
+    }
+
+    return 0;
+#undef buf_size
+}
+
 static int child_main(void *arg) {
     int ret = -1;
     struct nl_cache *cache = NULL;
@@ -227,9 +247,6 @@ static int child_main(void *arg) {
             }
     }
 
-#define buf_size 9000
-    char buf[buf_size];
-
     const int max_fd = max(tun_child, tun_host);
 
     while (1) {
@@ -249,15 +266,13 @@ static int child_main(void *arg) {
         }
 
         if (FD_ISSET(tun_child, &rd_set)) {
-            ssize_t found = read(tun_child, buf, buf_size);
-            printf("found %ld bytes\n", found);
-            if (found < 0) {
-                perror("read from child");
+            if (do_a_copy(tun_child, tun_host) < 0) {
                 goto done;
             }
-            ssize_t sent = write(tun_host, buf, found);
-            if (sent != found) {
-                perror("write to host");
+        }
+
+        if (FD_ISSET(tun_host, &rd_set)) {
+            if (do_a_copy(tun_host, tun_child) < 0) {
                 goto done;
             }
         }
