@@ -58,7 +58,7 @@ static int set_addr(struct nl_sock *sk, struct nl_cache *cache, char *dev) {
 
     const int ifindex = rtnl_link_name2i(cache, dev);
     if (!ifindex) {
-        perror("name2i");
+        fprintf(stderr, "error: name2i couldn't find new device '%s'\n", dev);
         goto done;
     }
 
@@ -86,7 +86,7 @@ done:
     return ret;
 }
 
-static int tun_alloc(struct nl_sock *sk, struct nl_cache *cache) {
+static int tun_alloc(char *out_if_name) {
     const char *clone_from = "/dev/net/tun";
 
     int fd = open(clone_from, O_RDWR);
@@ -123,17 +123,17 @@ static int tun_alloc(struct nl_sock *sk, struct nl_cache *cache) {
         goto fail;
     }
 
-    if (set_addr(sk, cache, ifr.ifr_name) < 0) {
-        goto fail;
+    if (out_if_name) {
+        strcpy(out_if_name, ifr.ifr_name);
     }
 
     goto done;
 fail:
+    close(fd);
     fd = -1;
 
 done:
     close(sock);
-    close(fd);
     return fd;
 }
 
@@ -151,6 +151,12 @@ int main() {
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
     int tun = -1;
+    char host_tap_name[IFNAMSIZ] = "";
+
+    tun = tun_alloc(host_tap_name);
+    if (tun < 0) {
+        goto done;
+    }
 
     sk = nl_socket_alloc();
     assert(sk);
@@ -165,11 +171,9 @@ int main() {
         goto done;
     }
 
-    tun = tun_alloc(sk, cache);
-    if (tun < 0) {
+    if (set_addr(sk, cache, host_tap_name) < 0) {
         goto done;
     }
-
 
     const int stack_size = 1024*1024;
 
