@@ -21,6 +21,46 @@
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
 
+static int make_nl(
+        struct nl_sock **sk,
+        struct nl_cache **cache
+        ) {
+    *sk = nl_socket_alloc();
+    assert(*sk);
+
+    if (nl_connect(*sk, NETLINK_ROUTE)) {
+        perror("nl_connect");
+        nl_socket_free(*sk);
+        *sk = NULL;
+        return -1;
+    }
+
+    *cache = NULL;
+    if (rtnl_link_alloc_cache(*sk, AF_UNSPEC, cache)) {
+        perror("alloc_cache");
+        nl_close(*sk);
+        nl_socket_free(*sk);
+        *sk = NULL;
+        *cache = NULL;
+        return -2;
+    }
+
+    return 0;
+}
+
+static void free_nl(
+        struct nl_sock *sk,
+        struct nl_cache *cache
+        ) {
+    if (sk) {
+        nl_close(sk);
+        nl_socket_free(sk);
+    }
+    if (cache) {
+        nl_cache_free(cache);
+    }
+}
+
 static int teleport_if(
         struct nl_sock *sk,
         struct nl_cache *cache,
@@ -138,12 +178,39 @@ done:
 }
 
 static int child_main(void *arg) {
-    int tun = *(int*)arg;
-    printf("%d\n", tun);
-    system("ip r");
-    system("ip a");
-    sleep(10000);
-    return 0;
+    int ret = -1;
+    struct nl_cache *cache = NULL;
+    struct nl_sock *sk = NULL;
+
+    int tun_host = *(int*)arg;
+
+
+    char child_tap_name[IFNAMSIZ] = "";
+    int tun_child = tun_alloc(child_tap_name);
+
+    if (tun_child < 0) {
+        goto done;
+    }
+
+    if (make_nl(&sk, &cache) < 0) {
+        goto done;
+    }
+
+    if (set_addr(sk, cache, child_tap_name) < 0) {
+        goto done;
+    }
+
+    while (1) {
+        printf("route:\n");
+        system("ip r");
+        system("ip a");
+        sleep(10);
+    }
+
+    ret = 0;
+done:
+    free_nl(sk, cache);
+    return ret;
 }
 
 int main() {
@@ -158,16 +225,7 @@ int main() {
         goto done;
     }
 
-    sk = nl_socket_alloc();
-    assert(sk);
-
-    if (nl_connect(sk, NETLINK_ROUTE)) {
-        perror("nl_connect");
-        goto done;
-    }
-
-    if (rtnl_link_alloc_cache(sk, AF_UNSPEC, &cache)) {
-        perror("alloc_cache");
+    if (make_nl(&sk, &cache) < 0) {
         goto done;
     }
 
