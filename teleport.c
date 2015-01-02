@@ -205,6 +205,25 @@ static int child_main(void *arg) {
         goto done;
     }
 
+    char *argp[] = { NULL };
+    char *argv[] = { "/sbin/dhclient", "-v", "eth0", NULL };
+
+    pid_t pid;
+    switch (pid = fork()) {
+        case -1:
+            perror("fork");
+            goto done;
+        case 0: // child
+            execve("/sbin/dhclient", argv, argp);
+            fprintf(stderr, "child couldn't execve");
+            goto done;
+        default:
+            if (waitpid(pid, NULL, 0) < 0) {
+                perror("waitpid");
+                goto done;
+            }
+    }
+
     while (1) {
         printf("route:\n");
         system("ip r");
