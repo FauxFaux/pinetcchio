@@ -21,6 +21,10 @@
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
 
+static int max (int left, int right) {
+    return left > right ? left : right;
+}
+
 static int make_nl(
         struct nl_sock **sk,
         struct nl_cache **cache
@@ -189,7 +193,6 @@ static int child_main(void *arg) {
 
     int tun_host = *(int*)arg;
 
-
     char child_tap_name[IFNAMSIZ] = "";
     int tun_child = tun_alloc(child_tap_name);
 
@@ -224,12 +227,53 @@ static int child_main(void *arg) {
             }
     }
 
+#define buf_size 9000
+    char buf[buf_size];
+
+    const int max_fd = max(tun_child, tun_host);
+
+    while (1) {
+        fd_set rd_set;
+        FD_ZERO(&rd_set);
+        FD_SET(tun_host, &rd_set);
+        FD_SET(tun_child, &rd_set);
+
+        int ret = select(max_fd + 1, &rd_set, NULL, NULL, NULL);
+
+        if (ret < 0) {
+            if (EINTR == errno) {
+                continue;
+            }
+            perror("select");
+            goto done;
+        }
+
+        if (FD_ISSET(tun_child, &rd_set)) {
+            ssize_t found = read(tun_child, buf, buf_size);
+            printf("found %ld bytes\n", found);
+            if (found < 0) {
+                perror("read from child");
+                goto done;
+            }
+            ssize_t sent = write(tun_host, buf, found);
+            if (sent != found) {
+                perror("write to host");
+                goto done;
+            }
+        }
+    }
+
+#undef buf_size
+
+#if 0
     while (1) {
         printf("route:\n");
         system("ip r");
         system("ip a");
         sleep(10);
     }
+#endif
+
 
     ret = 0;
 done:
