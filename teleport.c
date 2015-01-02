@@ -91,7 +91,12 @@ done:
     return ret;
 }
 
-static int set_addr(struct nl_sock *sk, struct nl_cache *cache, char *dev) {
+static int set_addr(
+        struct nl_sock *sk,
+        struct nl_cache *cache,
+        char *dev,
+        char *address
+        ) {
     int ret = -1;
     struct rtnl_addr *addr = rtnl_addr_alloc();
     assert(addr);
@@ -105,7 +110,7 @@ static int set_addr(struct nl_sock *sk, struct nl_cache *cache, char *dev) {
     rtnl_addr_set_ifindex(addr, ifindex);
 
     struct nl_addr *local_addr = NULL;
-    if (nl_addr_parse("192.168.211.2", AF_INET, &local_addr)) {
+    if (nl_addr_parse(address, AF_INET, &local_addr)) {
         perror("local parse");
         goto done;
     }
@@ -196,7 +201,7 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    if (set_addr(sk, cache, child_tap_name) < 0) {
+    if (set_addr(sk, cache, child_tap_name, "192.168.212.2") < 0) {
         goto done;
     }
 
@@ -229,7 +234,7 @@ int main() {
         goto done;
     }
 
-    if (set_addr(sk, cache, host_tap_name) < 0) {
+    if (set_addr(sk, cache, host_tap_name, "192.168.211.2") < 0) {
         goto done;
     }
 
