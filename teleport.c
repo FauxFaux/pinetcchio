@@ -5,6 +5,7 @@
 #include <string.h>
 #include <memory.h>
 
+#include <getopt.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -199,7 +200,7 @@ static int tun_alloc(char *out_if_name) {
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 
     if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
-        perror("set iff");
+        perror("creating tun device (set iff)");
         goto fail;
     }
 
@@ -359,16 +360,38 @@ done:
     return ret;
 }
 
-int main() {
+int main(int argc, char **argv) {
     int ret = 1;
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
     int tun = -1;
     char host_tun_name[IFNAMSIZ] = "";
 
-    const char *host_ip = "192.168.212.50";
-    const char *gw_ip = "192.168.212.1";
-    const char *phys_if = "eth0";
+    char *host_ip = strdup("192.168.212.50");
+    char *gw_ip = strdup("192.168.212.1");
+    char *phys_if = strdup("eth0");
+
+    static struct option long_options[] = {
+        {"interface", required_argument, 0,  'i' },
+        {0,           0,                 0,   0  }
+    };
+
+    int long_index = 0;
+    int opt;
+    while ((opt = getopt_long(argc, argv,"apl:b:", 
+                    long_options, &long_index )) != -1) {
+        switch (opt) {
+            case -1:
+                break;
+            case 'i':
+                free(phys_if);
+                phys_if = strdup(optarg);
+                break;
+            default:
+                fprintf(stderr, "unrecognised option '%c'\nUsage: %s [-i eth0]\n", opt, argv[0]);
+                goto done;
+        }
+    }
 
     tun = tun_alloc(host_tun_name);
     if (tun < 0) {
@@ -408,10 +431,7 @@ int main() {
 done:
     close(tun);
 
-    nl_cache_free(cache);
-    nl_close(sk);
-    nl_socket_free(sk);
-
+    free_nl(sk, cache);
 
     return 0;
 }
