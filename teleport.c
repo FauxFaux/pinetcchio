@@ -124,6 +124,8 @@ static int set_addr(
         goto done;
     }
 
+    rtnl_addr_set_prefixlen(addr, 24);
+
     if (rtnl_addr_add(sk, addr, 0)) {
         perror("addr add");
         goto done;
@@ -224,7 +226,7 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    if (set_addr(sk, cache, child_tun_name, "192.168.212.2") < 0) {
+    if (set_addr(sk, cache, child_tun_name, "192.168.212.19") < 0) {
         goto done;
     }
 
@@ -312,7 +314,7 @@ int main() {
         goto done;
     }
 
-    if (set_addr(sk, cache, host_tun_name, "192.168.211.2") < 0) {
+    if (set_addr(sk, cache, host_tun_name, "192.168.212.50") < 0) {
         goto done;
     }
 
