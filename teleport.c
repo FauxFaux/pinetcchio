@@ -282,16 +282,6 @@ static int child_main(void *arg) {
         }
     }
 
-#if 0
-    while (1) {
-        printf("route:\n");
-        system("ip r");
-        system("ip a");
-        sleep(10);
-    }
-#endif
-
-
     ret = 0;
 done:
     free_nl(sk, cache);
