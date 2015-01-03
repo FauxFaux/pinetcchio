@@ -198,7 +198,7 @@ static int do_a_copy(int from, int to) {
         perror("read from source");
         return -1;
     }
-    ssize_t sent = write(to, buf, found);
+    ssize_t sent = write(to, buf, (size_t)found);
     if (sent != found) {
         perror("write to target");
         return -2;
@@ -257,9 +257,9 @@ static int child_main(void *arg) {
         FD_SET(tun_host, &rd_set);
         FD_SET(tun_child, &rd_set);
 
-        int ret = select(max_fd + 1, &rd_set, NULL, NULL, NULL);
+        int sel = select(max_fd + 1, &rd_set, NULL, NULL, NULL);
 
-        if (ret < 0) {
+        if (sel < 0) {
             if (EINTR == errno) {
                 continue;
             }
@@ -279,8 +279,6 @@ static int child_main(void *arg) {
             }
         }
     }
-
-#undef buf_size
 
 #if 0
     while (1) {
