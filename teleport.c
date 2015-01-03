@@ -147,7 +147,7 @@ static int tun_alloc(char *out_if_name) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(struct ifreq));
 
-    ifr.ifr_flags = IFF_TAP;
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 
     if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
         perror("set iff");
@@ -213,8 +213,8 @@ static int child_main(void *arg) {
 
     int tun_host = *(int*)arg;
 
-    char child_tap_name[IFNAMSIZ] = "";
-    int tun_child = tun_alloc(child_tap_name);
+    char child_tun_name[IFNAMSIZ] = "";
+    int tun_child = tun_alloc(child_tun_name);
 
     if (tun_child < 0) {
         goto done;
@@ -224,7 +224,7 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    if (set_addr(sk, cache, child_tap_name, "192.168.212.2") < 0) {
+    if (set_addr(sk, cache, child_tun_name, "192.168.212.2") < 0) {
         goto done;
     }
 
@@ -301,9 +301,9 @@ int main() {
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
     int tun = -1;
-    char host_tap_name[IFNAMSIZ] = "";
+    char host_tun_name[IFNAMSIZ] = "";
 
-    tun = tun_alloc(host_tap_name);
+    tun = tun_alloc(host_tun_name);
     if (tun < 0) {
         goto done;
     }
@@ -312,7 +312,7 @@ int main() {
         goto done;
     }
 
-    if (set_addr(sk, cache, host_tap_name, "192.168.211.2") < 0) {
+    if (set_addr(sk, cache, host_tun_name, "192.168.211.2") < 0) {
         goto done;
     }
 
