@@ -236,16 +236,28 @@ done:
     return fd;
 }
 
-static int do_a_copy(int from, int to) {
+static void print_packet(const char *prefix, char *buf, ssize_t len) {
+    int ip_header_length = (*buf & 0x0f) * 4;
+    const char *tcp = buf + ip_header_length;
+    printf("%s: %4ld %2d (%5d -> %5d)\n", prefix, len,
+            *(buf+9),                     // ip protocol
+            ntohs(*(uint16_t*)tcp),       // src port
+            ntohs(*(((uint16_t*)tcp)+4))  // dest port
+            );
+}
+
+static int do_a_copy(const char *prefix, int from, int to) {
 #define buf_size 9000
     char buf[buf_size];
 
     ssize_t found = read(from, buf, buf_size);
-    printf("found %ld bytes\n", found);
     if (found < 0) {
         perror("read from source");
         return -1;
     }
+
+    print_packet(prefix, buf, found);
+
     ssize_t sent = write(to, buf, (size_t)found);
     if (sent != found) {
         perror("write to target");
@@ -342,13 +354,13 @@ static int child_main(void *void_arg) {
         }
 
         if (FD_ISSET(tun_child, &rd_set)) {
-            if (do_a_copy(tun_child, tun_host) < 0) {
+            if (do_a_copy("<-", tun_child, tun_host) < 0) {
                 goto done;
             }
         }
 
         if (FD_ISSET(tun_host, &rd_set)) {
-            if (do_a_copy(tun_host, tun_child) < 0) {
+            if (do_a_copy("->", tun_host, tun_child) < 0) {
                 goto done;
             }
         }
