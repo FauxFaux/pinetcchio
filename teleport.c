@@ -390,7 +390,7 @@ int main(int argc, char **argv) {
 
     int long_index = 0;
     int opt;
-    while ((opt = getopt_long(argc, argv,"apl:b:", 
+    while ((opt = getopt_long(argc, argv, "i:",
                     long_options, &long_index )) != -1) {
         switch (opt) {
             case -1:
