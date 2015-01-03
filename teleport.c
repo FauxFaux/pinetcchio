@@ -208,6 +208,25 @@ static int do_a_copy(int from, int to) {
 #undef buf_size
 }
 
+static int system_s(char **argv) {
+    pid_t pid;
+    switch (pid = fork()) {
+        case -1:
+            perror("fork");
+            return -1;
+        case 0: // child
+            execv(argv[0], argv);
+            fprintf(stderr, "child couldn't execve");
+            return -2;
+        default:
+            if (waitpid(pid, NULL, 0) < 0) {
+                perror("waitpid");
+                return -3;
+            }
+            return 0;
+    }
+}
+
 static int child_main(void *arg) {
     int ret = -1;
     struct nl_cache *cache = NULL;
@@ -230,24 +249,7 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    char *argp[] = { NULL };
-    char *argv[] = { "/sbin/dhclient", "-v", "eth0", NULL };
-
-    pid_t pid;
-    switch (pid = fork()) {
-        case -1:
-            perror("fork");
-            goto done;
-        case 0: // child
-            execve("/sbin/dhclient", argv, argp);
-            fprintf(stderr, "child couldn't execve");
-            goto done;
-        default:
-            if (waitpid(pid, NULL, 0) < 0) {
-                perror("waitpid");
-                goto done;
-            }
-    }
+    system_s((char *[]) { "/sbin/dhclient", "-v", "eth0", NULL });
 
     const int max_fd = max(tun_child, tun_host);
 
