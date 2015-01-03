@@ -388,7 +388,7 @@ int main(int argc, char **argv) {
                 phys_if = strdup(optarg);
                 break;
             default:
-                fprintf(stderr, "unrecognised option '%c'\nUsage: %s [-i eth0]\n", opt, argv[0]);
+                fprintf(stderr, "Usage: %s [-i eth0]\n", argv[0]);
                 goto done;
         }
     }
