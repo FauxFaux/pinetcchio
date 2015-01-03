@@ -20,6 +20,7 @@
 
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
+#include <netlink/route/route.h>
 
 static int max (int left, int right) {
     return left > right ? left : right;
@@ -65,6 +66,47 @@ static void free_nl(
     }
 }
 
+static int add_route(
+        struct nl_sock *sk,
+        int ifindex,
+        char *gateway
+        ) {
+    int ret = -1;
+
+    struct rtnl_route *route = rtnl_route_alloc();
+    assert(route);
+
+    struct rtnl_nexthop *next_hop = rtnl_route_nh_alloc();
+    assert(next_hop);
+
+    struct nl_addr *default_addr = nl_addr_build(AF_INET, NULL, 0);
+    assert(default_addr);
+
+    struct nl_addr *gateway_addr = NULL;
+    if (nl_addr_parse(gateway, AF_INET, &gateway_addr)) {
+        perror("gateway parse");
+        goto done;
+    }
+
+    rtnl_route_nh_set_ifindex(next_hop, ifindex);
+    rtnl_route_nh_set_gateway(next_hop, gateway_addr);
+
+    rtnl_route_set_dst(route, default_addr);
+    rtnl_route_add_nexthop(route, next_hop);
+
+    if (rtnl_route_add(sk, route, 0) < 0) {
+        perror("route add");
+        goto done;
+    }
+
+    ret = 0;
+done:
+    nl_addr_put(default_addr);
+    nl_addr_put(gateway_addr);
+    rtnl_route_put(route);
+    return ret;
+}
+
 static int teleport_if(
         struct nl_sock *sk,
         struct nl_cache *cache,
@@ -99,7 +141,8 @@ static int set_addr(
         struct nl_sock *sk,
         struct nl_cache *cache,
         char *dev,
-        char *address
+        char *address,
+        char *via
         ) {
     int ret = -1;
     struct rtnl_addr *addr = rtnl_addr_alloc();
@@ -128,6 +171,10 @@ static int set_addr(
 
     if (rtnl_addr_add(sk, addr, 0)) {
         perror("addr add");
+        goto done;
+    }
+
+    if (via && add_route(sk, ifindex, via) < 0) {
         goto done;
     }
 
@@ -245,11 +292,17 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    if (set_addr(sk, cache, child_tun_name, "192.168.212.19") < 0) {
+    if (set_addr(sk, cache, child_tun_name, "192.168.212.1", NULL) < 0) {
         goto done;
     }
 
     system_s((char *[]) { "/sbin/dhclient", "-v", "eth0", NULL });
+    system_s((char *[]) { "/sbin/iptables",
+            "-t", "nat",
+            "-A", "POSTROUTING",
+            "-o", "eth0",
+            "-j", "MASQUERADE",
+            NULL });
 
     const int max_fd = max(tun_child, tun_host);
 
@@ -304,7 +357,8 @@ int main() {
         goto done;
     }
 
-    if (set_addr(sk, cache, host_tun_name, "192.168.212.50") < 0) {
+    if (set_addr(sk, cache, host_tun_name,
+                "192.168.212.50", "192.168.212.1") < 0) {
         goto done;
     }
 
@@ -322,6 +376,7 @@ int main() {
     if (teleport_if(sk, cache, "eth0", child) < 0) {
         return 3;
     }
+
 
     printf("launched child %d\n", child);
     waitpid(child, NULL, 0);
