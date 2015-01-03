@@ -69,7 +69,7 @@ static void free_nl(
 static int add_route(
         struct nl_sock *sk,
         int ifindex,
-        char *gateway
+        const char *gateway
         ) {
     int ret = -1;
 
@@ -141,8 +141,8 @@ static int set_addr(
         struct nl_sock *sk,
         struct nl_cache *cache,
         char *dev,
-        char *address,
-        char *via
+        const char *address,
+        const char *via
         ) {
     int ret = -1;
     struct rtnl_addr *addr = rtnl_addr_alloc();
@@ -274,12 +274,23 @@ static int system_s(char **argv) {
     }
 }
 
-static int child_main(void *arg) {
+struct child_arg {
+    const char *gw_ip;
+    const char *phys_if;
+    int tun_host;
+    int flags;
+};
+
+static int child_main(void *void_arg) {
     int ret = -1;
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
 
-    int tun_host = *(int*)arg;
+    struct child_arg *arg = void_arg;
+
+    const int tun_host = arg->tun_host;
+    const char *gw_ip = arg->gw_ip;
+    const char *phys_if = arg->phys_if;
 
     char child_tun_name[IFNAMSIZ] = "";
     int tun_child = tun_alloc(child_tun_name);
@@ -292,17 +303,24 @@ static int child_main(void *arg) {
         goto done;
     }
 
-    if (set_addr(sk, cache, child_tun_name, "192.168.212.1", NULL) < 0) {
+    if (set_addr(sk, cache, child_tun_name, gw_ip, NULL) < 0) {
         goto done;
     }
 
-    system_s((char *[]) { "/sbin/dhclient", "-v", "eth0", NULL });
+    char *phys_if_dup[] = { strdup(phys_if), strdup(phys_if) };
+    assert(phys_if_dup[0]);
+    assert(phys_if_dup[1]);
+
+    system_s((char *[]) { "/sbin/dhclient", "-v", phys_if_dup[0], NULL });
     system_s((char *[]) { "/sbin/iptables",
             "-t", "nat",
             "-A", "POSTROUTING",
-            "-o", "eth0",
+            "-o", phys_if_dup[1],
             "-j", "MASQUERADE",
             NULL });
+
+    free(phys_if_dup[0]);
+    free(phys_if_dup[1]);
 
     const int max_fd = max(tun_child, tun_host);
 
@@ -348,6 +366,10 @@ int main() {
     int tun = -1;
     char host_tun_name[IFNAMSIZ] = "";
 
+    const char *host_ip = "192.168.212.50";
+    const char *gw_ip = "192.168.212.1";
+    const char *phys_if = "eth0";
+
     tun = tun_alloc(host_tun_name);
     if (tun < 0) {
         goto done;
@@ -358,22 +380,23 @@ int main() {
     }
 
     if (set_addr(sk, cache, host_tun_name,
-                "192.168.212.50", "192.168.212.1") < 0) {
+                host_ip, gw_ip) < 0) {
         goto done;
     }
 
     const int stack_size = 1024*1024;
 
+    struct child_arg child_arg = { gw_ip, phys_if, tun, 0 };
     char *child_stack = malloc(stack_size);
     pid_t child = clone(child_main, child_stack + stack_size,
             SIGCHLD | CLONE_NEWNET | CLONE_FILES,
-            &tun);
+            &child_arg);
     if (child == -1) {
         perror("clone");
         return 2;
     }
 
-    if (teleport_if(sk, cache, "eth0", child) < 0) {
+    if (teleport_if(sk, cache, phys_if, child) < 0) {
         return 3;
     }
 
