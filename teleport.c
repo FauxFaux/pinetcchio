@@ -238,6 +238,15 @@ done:
     return fd;
 }
 
+int do_a_send(int to, const char *buf, size_t found) {
+    ssize_t sent = write(to, buf, found);
+    if (sent != found) {
+        perror("write to target");
+        return -2;
+    }
+    return 0;
+}
+
 static int do_a_copy(
         struct modifier *modifier,
         enum direction direction,
@@ -252,12 +261,6 @@ static int do_a_copy(
     }
 
     packet_seen(modifier, direction, buf, found);
-
-    ssize_t sent = write(to, buf, (size_t)found);
-    if (sent != found) {
-        perror("write to target");
-        return -2;
-    }
 
     return 0;
 #undef buf_size
@@ -331,7 +334,7 @@ static int child_main(void *void_arg) {
     free(phys_if_dup[0]);
     free(phys_if_dup[1]);
 
-    modifier = modifier_alloc();
+    modifier = modifier_alloc(tun_child, tun_host);
     assert(modifier);
 
     const int max_fd = max(tun_child, tun_host);

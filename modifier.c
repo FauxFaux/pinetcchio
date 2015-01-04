@@ -16,27 +16,25 @@ struct modifier {
 };
 
 static int l_send_packet(lua_State *lua) {
-    unsigned int fd = lua_tounsigned(lua, lua_upvalueindex(1));
     enum direction direction = lua_toboolean(lua, 1) ? DIR_IN : DIR_OUT;
+    unsigned int fd = lua_tounsigned(lua,
+            lua_upvalueindex(DIR_IN == direction ? 1 : 2));
     size_t len = 0;
     const char *buf = lua_tolstring(lua, 2, &len);
     assert(buf);
-    printf("%u: got %s packet of length %lu from lua\n",
-            fd,
-            DIR_IN == direction ? "inbound" : "outbound",
-            len);
+    do_a_send((int)fd, buf, len);
     return 0;
 }
 
-struct modifier *modifier_alloc() {
+struct modifier *modifier_alloc(int in_fd, int out_fd) {
     struct modifier *ret = malloc(sizeof(struct modifier));
     assert(ret);
 
     ret->lua = luaL_newstate();
     luaL_openlibs(ret->lua);
 
-    lua_pushunsigned(ret->lua, 3);
-    lua_pushunsigned(ret->lua, 4);
+    lua_pushunsigned(ret->lua, in_fd);
+    lua_pushunsigned(ret->lua, out_fd);
     lua_pushcclosure(ret->lua, &l_send_packet, 2);
     lua_setglobal(ret->lua, "send_packet");
 
