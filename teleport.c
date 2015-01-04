@@ -23,6 +23,8 @@
 #include <netlink/route/link.h>
 #include <netlink/route/route.h>
 
+#include "app.h"
+
 static int max (int left, int right) {
     return left > right ? left : right;
 }
@@ -234,16 +236,6 @@ fail:
 done:
     close(sock);
     return fd;
-}
-
-static void print_packet(const char *prefix, char *buf, ssize_t len) {
-    int ip_header_length = (*buf & 0x0f) * 4;
-    const char *tcp = buf + ip_header_length;
-    printf("%s: %4ld %2d (%5d -> %5d)\n", prefix, len,
-            *(buf+9),                     // ip protocol
-            ntohs(*(uint16_t*)tcp),       // src port
-            ntohs(*(((uint16_t*)tcp)+4))  // dest port
-            );
 }
 
 static int do_a_copy(const char *prefix, int from, int to) {
