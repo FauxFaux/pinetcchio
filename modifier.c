@@ -61,7 +61,7 @@ void packet_seen(
         char *buf,
         ssize_t len) {
     lua_State *const lua = modifier->lua;
-    lua_getglobal(lua, "modify");
+    lua_getglobal(lua, "packet_seen");
 
     lua_pushboolean(lua, direction);
     // TODO: annoying copy
