@@ -238,7 +238,10 @@ done:
     return fd;
 }
 
-static int do_a_copy(struct modifier *modifier, const char *prefix, int from, int to) {
+static int do_a_copy(
+        struct modifier *modifier,
+        enum direction direction,
+        int from, int to) {
 #define buf_size 9000
     char buf[buf_size];
 
@@ -248,7 +251,7 @@ static int do_a_copy(struct modifier *modifier, const char *prefix, int from, in
         return -1;
     }
 
-    packet_seen(modifier, prefix, buf, found);
+    packet_seen(modifier, direction, buf, found);
 
     ssize_t sent = write(to, buf, (size_t)found);
     if (sent != found) {
@@ -350,13 +353,13 @@ static int child_main(void *void_arg) {
         }
 
         if (FD_ISSET(tun_child, &rd_set)) {
-            if (do_a_copy(modifier, "<-", tun_child, tun_host) < 0) {
+            if (do_a_copy(modifier, DIR_IN, tun_child, tun_host) < 0) {
                 goto done;
             }
         }
 
         if (FD_ISSET(tun_host, &rd_set)) {
-            if (do_a_copy(modifier, "->", tun_host, tun_child) < 0) {
+            if (do_a_copy(modifier, DIR_OUT, tun_host, tun_child) < 0) {
                 goto done;
             }
         }
