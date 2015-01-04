@@ -238,7 +238,7 @@ done:
     return fd;
 }
 
-static int do_a_copy(const char *prefix, int from, int to) {
+static int do_a_copy(struct modifier *modifier, const char *prefix, int from, int to) {
 #define buf_size 9000
     char buf[buf_size];
 
@@ -248,7 +248,7 @@ static int do_a_copy(const char *prefix, int from, int to) {
         return -1;
     }
 
-    print_packet(prefix, buf, found);
+    print_packet(modifier, prefix, buf, found);
 
     ssize_t sent = write(to, buf, (size_t)found);
     if (sent != found) {
@@ -290,6 +290,7 @@ static int child_main(void *void_arg) {
     int ret = -1;
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
+    struct modifier *modifier = NULL;
 
     struct child_arg *arg = void_arg;
 
@@ -327,6 +328,9 @@ static int child_main(void *void_arg) {
     free(phys_if_dup[0]);
     free(phys_if_dup[1]);
 
+    modifier = modifier_alloc();
+    assert(modifier);
+
     const int max_fd = max(tun_child, tun_host);
 
     while (1) {
@@ -346,13 +350,13 @@ static int child_main(void *void_arg) {
         }
 
         if (FD_ISSET(tun_child, &rd_set)) {
-            if (do_a_copy("<-", tun_child, tun_host) < 0) {
+            if (do_a_copy(modifier, "<-", tun_child, tun_host) < 0) {
                 goto done;
             }
         }
 
         if (FD_ISSET(tun_host, &rd_set)) {
-            if (do_a_copy("->", tun_host, tun_child) < 0) {
+            if (do_a_copy(modifier, "->", tun_host, tun_child) < 0) {
                 goto done;
             }
         }
@@ -361,6 +365,7 @@ static int child_main(void *void_arg) {
     ret = 0;
 done:
     free_nl(sk, cache);
+    modifier_free(modifier);
     return ret;
 }
 
