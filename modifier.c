@@ -38,7 +38,7 @@ void modifier_free(struct modifier *modifier) {
     free(modifier);
 }
 
-void print_packet(
+void mutate(
         struct modifier *const modifier,
         const char *prefix,
         char *buf,

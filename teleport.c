@@ -248,7 +248,7 @@ static int do_a_copy(struct modifier *modifier, const char *prefix, int from, in
         return -1;
     }
 
-    print_packet(modifier, prefix, buf, found);
+    mutate(modifier, prefix, buf, found);
 
     ssize_t sent = write(to, buf, (size_t)found);
     if (sent != found) {
