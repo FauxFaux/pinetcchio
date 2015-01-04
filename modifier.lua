@@ -1,5 +1,4 @@
 function modify(inbound, frame)
-    print(string.len(frame))
+    send_packet(not inbound, frame)
 end
 
-print("hi from lua")
