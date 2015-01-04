@@ -251,19 +251,23 @@ static int do_a_copy(
         struct modifier *modifier,
         enum direction direction,
         int from, int to) {
-#define buf_size 9000
+#define mtu_guess 9198
+#define buf_size (mtu_guess + 1 + sizeof(uint16_t))
     char buf[buf_size];
 
-    ssize_t found = read(from, buf, buf_size);
-    if (found < 0) {
+    ssize_t found = read(from, buf + sizeof(uint16_t), buf_size);
+    if (found < 0 || found > mtu_guess) {
         perror("read from source");
         return -1;
     }
+
+    *((uint16_t*)buf) = (uint16_t)found;
 
     packet_seen(modifier, direction, buf, found);
 
     return 0;
 #undef buf_size
+#undef mtu_guess
 }
 
 static int system_s(char **argv) {

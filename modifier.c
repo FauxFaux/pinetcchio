@@ -19,10 +19,10 @@ static int l_send_packet(lua_State *lua) {
     enum direction direction = lua_toboolean(lua, 1) ? DIR_IN : DIR_OUT;
     unsigned int fd = lua_tounsigned(lua,
             lua_upvalueindex(DIR_IN == direction ? 1 : 2));
-    size_t len = 0;
-    const char *buf = lua_tolstring(lua, 2, &len);
+    const char *buf = lua_touserdata(lua, 2);
     assert(buf);
-    do_a_send((int)fd, buf, len);
+    size_t len = *(uint16_t*)buf;
+    do_a_send((int)fd, buf + sizeof(uint16_t), len);
     return 0;
 }
 
@@ -64,8 +64,7 @@ void packet_seen(
     lua_getglobal(lua, "packet_seen");
 
     lua_pushboolean(lua, direction);
-    // TODO: annoying copy
-    lua_pushlstring(lua, buf, (size_t)len);
+    lua_pushlightuserdata(lua, buf);
 
     if (lua_pcall(lua, 2, 0, 0)) {
         int ip_header_length = (*buf & 0x0f) * 4;
@@ -75,7 +74,7 @@ void packet_seen(
                 len,
                 *(buf+9),                     // ip protocol
                 ntohs(*(uint16_t*)tcp),       // src port
-                ntohs(*(((uint16_t*)tcp)+4)),  // dest port
+                ntohs(*(((uint16_t*)tcp)+4)), // dest port
                 lua_tostring(lua, -1)
                 );
         lua_pop(lua, 1);
