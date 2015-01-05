@@ -26,6 +26,34 @@ static int l_send_packet(lua_State *lua) {
     return 0;
 }
 
+static int l_set_byte(lua_State *lua) {
+    char *buf = lua_touserdata(lua, 1);
+    assert(buf);
+    uint32_t offset = lua_tounsigned(lua, 2);
+    uint32_t value = lua_tounsigned(lua, 3);
+
+    size_t len = *(uint16_t*)buf;
+    if (offset > len) {
+        return luaL_error(lua, "offset %u beyond length of frame (%u)", offset, len);
+    }
+
+    if (value > 0xff) {
+        return luaL_error(lua, "%u is too big for a byte", value);
+    }
+
+    buf[sizeof(uint16_t) + offset] = value;
+
+    return 0;
+}
+
+static int l_get_len(lua_State *lua) {
+    char *buf = lua_touserdata(lua, 1);
+    assert(buf);
+    uint32_t len = *(uint16_t*)buf;
+    lua_pushunsigned(lua, len);
+    return 1;
+}
+
 struct modifier *modifier_alloc(int in_fd, int out_fd) {
     struct modifier *ret = malloc(sizeof(struct modifier));
     assert(ret);
@@ -37,6 +65,12 @@ struct modifier *modifier_alloc(int in_fd, int out_fd) {
     lua_pushunsigned(ret->lua, out_fd);
     lua_pushcclosure(ret->lua, &l_send_packet, 2);
     lua_setglobal(ret->lua, "send_packet");
+
+    lua_pushcfunction(ret->lua, &l_set_byte);
+    lua_setglobal(ret->lua, "set_byte");
+
+    lua_pushcfunction(ret->lua, &l_get_len);
+    lua_setglobal(ret->lua, "get_len");
 
     if (luaL_dofile(ret->lua, "modifier.lua")) {
         printf("problem loading script: %s", lua_tostring(ret->lua, -1));
