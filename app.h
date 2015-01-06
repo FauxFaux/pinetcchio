@@ -1,4 +1,5 @@
-#include <stdint.h>
+// unistd needed for ssize_t
+#include <unistd.h>
 
 int do_a_send(int to, const char *buf, size_t found);
 
@@ -12,4 +13,10 @@ void packet_seen(
         enum direction direction,
         char *buf,
         ssize_t len);
+
+
+struct tcb;
+struct tcb *tcp_alloc(void);
+void tcp_consume(struct tcb *tcb, const char *buf, size_t len);
+void tcp_free(struct tcb *tcb);
 
