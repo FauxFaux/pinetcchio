@@ -301,6 +301,7 @@ static int child_main(void *void_arg) {
     struct nl_cache *cache = NULL;
     struct nl_sock *sk = NULL;
     struct modifier *modifier = NULL;
+    struct tcb *tcb = NULL;
 
     struct child_arg *arg = void_arg;
 
@@ -341,13 +342,19 @@ static int child_main(void *void_arg) {
     modifier = modifier_alloc(tun_child, tun_host);
     assert(modifier);
 
+    tcb = tcp_alloc();
+    assert(tcb);
+
     const int max_fd = max(tun_child, tun_host);
 
     while (1) {
-        fd_set rd_set;
+        fd_set rd_set, wr_set;
         FD_ZERO(&rd_set);
+        FD_ZERO(&wr_set);
         FD_SET(tun_host, &rd_set);
         FD_SET(tun_child, &rd_set);
+
+        tcp_fd_set(tcb, &rd_set, &wr_set);
 
         int sel = select(max_fd + 1, &rd_set, NULL, NULL, NULL);
 
@@ -370,12 +377,15 @@ static int child_main(void *void_arg) {
                 goto done;
             }
         }
+
+        tcp_fd_consume(tcb, &rd_set, &wr_set);
     }
 
     ret = 0;
 done:
     free_nl(sk, cache);
     modifier_free(modifier);
+    tcp_free(tcb);
     return ret;
 }
 

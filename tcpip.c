@@ -1,8 +1,10 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <arpa/inet.h>
+#include <errno.h>
 
 #include "app.h"
 
@@ -45,22 +47,57 @@ struct port_data {
     int seq_from_client;
     int seq_to_client;
     int offset;
+    int upstream;
     enum conn_state conn_state;
 };
 
 struct tcb {
     struct port_data ports[MAX_PORT];
+    struct waiting_port *waiting;
 };
 
 struct tcb *tcp_alloc() {
     return calloc(sizeof(struct tcb), 1);
 }
 
+struct waiting_port {
+    struct waiting_port *next;
+    struct port_data *value;
+};
+
 void tcp_free(struct tcb *tcb) {
     if (!tcb) {
         return;
     }
     free(tcb);
+}
+
+static void insert_waiting_port(struct tcb *tcb, struct port_data *port) {
+    struct waiting_port *head = tcb->waiting;
+    tcb->waiting = malloc(sizeof(struct waiting_port));
+    tcb->waiting->next = head;
+    tcb->waiting->value = port;
+}
+
+void tcp_fd_set(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
+    for (struct waiting_port *curr = tcb->waiting;
+            NULL != curr;
+            curr = curr->next) {
+        // TODO read or write or whatever?
+        FD_SET(curr->value->upstream, rd_set);
+        FD_SET(curr->value->upstream, wr_set);
+    }
+}
+
+void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
+    for (struct waiting_port *curr = tcb->waiting;
+            NULL != curr;
+            curr = curr->next) {
+        int writable = FD_ISSET(curr->value->upstream, wr_set);
+        if (writable && CONN_SYN_RECIEVED == curr->value->conn_state) {
+            // TODO connection accepted, time to ACK the client
+        }
+    }
 }
 
 void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
@@ -106,7 +143,18 @@ void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
 
     if (main_flags & TCP_FLAG_SYN) {
         tcp_assert(CONN_LISTENING == port->conn_state);
-        // TODO: send syn/ack
+        port->upstream = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        assert(port->upstream > 0);
+
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(struct sockaddr_in));
+        if (connect(port->upstream,
+                (struct sockaddr*)&addr,
+                sizeof(struct sockaddr_in))) {
+            assert(EINPROGRESS == errno);
+        }
+
+        insert_waiting_port(tcb, port);
         port->conn_state = CONN_SYN_RECIEVED;
     }
 

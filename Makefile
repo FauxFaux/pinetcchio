@@ -1,5 +1,6 @@
 CC=clang
-CFLAGS=-Weverything -isystem /usr/include/libnl3 -isystem /usr/include/lua5.2 -g -std=c99
+FLAGS=-Weverything -Wno-unused-variable -g
+CFLAGS=-isystem /usr/include/libnl3 -isystem /usr/include/lua5.2 -std=c99 ${FLAGS}
 LDLIBS=-lnl-3 -lnl-route-3 -llua5.2
 
 all: teleport tcpip_test
@@ -7,7 +8,7 @@ all: teleport tcpip_test
 test: tcpip_test
 	./tcpip_test
 
-teleport: teleport.o modifier.o
+teleport: teleport.o modifier.o tcpip.o
 
 tcpip_test: tcpip.o tcpip_test.o
 
