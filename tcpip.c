@@ -30,6 +30,19 @@ static uint16_t read_uint16_t(const char *buf) {
          + (uint8_t)buf[1];
 }
 
+static void write_uint32_t(char *buf, uint16_t val) {
+    buf[0] = (char) (val >> 24) & 0xff;
+    buf[1] = (char) (val >> 16) & 0xff;
+    buf[2] = (char) (val >> 8) & 0xff;
+    buf[3] = (char) (val) & 0xff;
+}
+
+
+static void write_uint16_t(char *buf, uint16_t val) {
+    buf[0] = (char) (val >> 8) & 0xff;
+    buf[1] = (char) (val) & 0xff;
+}
+
 static uint32_t read_uint32_t(const char *buf) {
     return (uint8_t)buf[0] * 0x1000000
          + (uint8_t)buf[1] * 0x10000
@@ -48,6 +61,11 @@ struct port_data {
     int seq_to_client;
     int offset;
     int upstream;
+    char source[4];
+    char dest[4];
+    uint16_t source_port;
+    uint16_t dest_port;
+    uint32_t sequence_out;
     enum conn_state conn_state;
 };
 
@@ -96,6 +114,25 @@ void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
         int writable = FD_ISSET(curr->value->upstream, wr_set);
         if (writable && CONN_SYN_RECIEVED == curr->value->conn_state) {
             // TODO connection accepted, time to ACK the client
+            char *ack = calloc(40, 1);
+            ack[0] = 0x45;
+            ack[2] = 0;
+            ack[3] = 40;
+            write_uint16_t(ack+4, rand());
+            ack[6] = IP_FLAG_DONT_FRAGMENT;
+            ack[8] = (char)0xff;
+            ack[9] = IP_PROTOCOL_TCP;
+
+            memcpy(ack+12, curr->value->source, 4);
+            memcpy(ack+16, curr->value->dest, 4);
+
+            write_uint16_t(ack+20, curr->value->source_port);
+            write_uint16_t(ack+22, curr->value->dest_port);
+            write_uint32_t(ack+24, ++curr->value->sequence_out);
+            write_uint32_t(ack+28, 0); // TODO acking
+            ack[32] = 0x50; // no options
+            ack[33] = TCP_FLAG_SYN | TCP_FLAG_ACK;
+            write_uint16_t(ack+34, 1460);
         }
     }
 }
@@ -156,6 +193,10 @@ void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
 
         insert_waiting_port(tcb, port);
         port->conn_state = CONN_SYN_RECIEVED;
+        memcpy(port->source, source_ip, 4);
+        memcpy(port->dest, dest_ip, 4);
+        port->source_port = source_port;
+        port->dest_port = dest_port;
     }
 
     const char *data = buf + tcp_header_length;
