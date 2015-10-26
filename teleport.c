@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
 
     char *host_ip = strdup("192.168.212.50");
     char *gw_ip = strdup("192.168.212.1");
-    char *phys_if = strdup("eth0");
+    char *phys_if = strdup("em1");
 
     static struct option long_options[] = {
         {"interface", required_argument, 0,  'i' },
@@ -417,7 +417,7 @@ int main(int argc, char **argv) {
                 phys_if = strdup(optarg);
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-i eth0]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-i em1]\n", argv[0]);
                 goto done;
         }
     }

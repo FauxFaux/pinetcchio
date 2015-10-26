@@ -1,4 +1,4 @@
 sudo nsenter -n -t $childpid
 
-for f in */ns/net; do nsenter --net=$f ip a | grep eth0 && echo $f; done
+for f in */ns/net; do nsenter --net=$f ip a | grep em1 && echo $f; done
 
