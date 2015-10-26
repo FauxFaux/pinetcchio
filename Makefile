@@ -3,7 +3,7 @@ FLAGS=-Weverything -Wno-unused-variable -g
 CFLAGS=-isystem /usr/include/libnl3 -isystem /usr/include/lua5.2 -std=c99 ${FLAGS}
 LDLIBS=-lnl-3 -lnl-route-3 -llua5.2
 
-all: teleport tcpip_test
+all: teleport tcpip_test pocksify
 
 test: tcpip_test
 	./tcpip_test
