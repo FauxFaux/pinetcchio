@@ -8,17 +8,19 @@ all: teleport tcpip_test pocksify
 test: tcpip_test
 	./tcpip_test
 
-teleport: teleport.o modifier.o tcpip.o
+teleport: teleport.o modifier.o tcpip.o tun.o
 
 tcpip_test: tcpip.o tcpip_test.o
 
-teleport.o: app.h
+teleport.o: app.h tun.h
 
 modifier.o: app.h
 
 tcpip.o: app.h
 
 tcpip_test.o: app.h
+
+tun.o: tun.h
 
 deps:
 	sudo apt-get install libnl-route-3-dev liblua5.2-dev
