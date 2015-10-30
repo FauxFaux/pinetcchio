@@ -9,6 +9,8 @@ all: teleport pocksify
 
 teleport: teleport.o modifier.o tcpip.o tun.o
 
+pocksify: pocksify.o tun.o
+
 teleport.o: app.h tun.h
 
 modifier.o: app.h

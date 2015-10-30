@@ -15,6 +15,11 @@
 #include <sys/mount.h>
 #include <sys/wait.h>
 
+#include <netinet/in.h>
+#include <linux/if.h>
+
+#include "tun.h"
+
 static int drop_setgroups() {
     const char *deny = "deny";
     FILE *fd = fopen("/proc/self/setgroups", "w");
@@ -58,10 +63,58 @@ static int map_id(const char *file, uint32_t from, uint32_t to) {
     return 0;
 }
 
-int main(int argc, char *argv[]) {
-    uid_t real_euid = geteuid();
-    gid_t real_egid = getegid();;
+static int enter_namespace(bool become_fake_root) {
+    if (-1 == unshare(CLONE_NEWNET | CLONE_NEWUSER)) {
+        perror("unshare failed");
+        return 1;
+    }
 
+    if (become_fake_root) {
+        uid_t real_euid = geteuid();
+        gid_t real_egid = getegid();
+
+        /* according to util-linux' source,
+        * since Linux 3.19 unprivileged writing of /proc/self/gid_map
+        * has been disabled unless /proc/self/setgroups is written
+        * first to permanently disable the ability to call setgroups
+        * in that user namespace. */
+        int err;
+        if ((err = drop_setgroups())) {
+            return err;
+        }
+        if ((err = map_id("/proc/self/uid_map", 0, real_euid))) {
+            return err;
+        }
+        if ((err = map_id("/proc/self/gid_map", 0, real_egid))) {
+            return err;
+        }
+    }
+
+    struct nl_sock *sk;
+    struct nl_cache *cache;
+
+    char child_tun_name[IFNAMSIZ] = "";
+    int tun_child = tun_alloc(child_tun_name);
+
+    if (tun_child < 0) {
+        goto done;
+    }
+
+    if (make_nl(&sk, &cache) < 0) {
+        goto done;
+    }
+
+    if (set_addr(sk, cache, child_tun_name, "192.168.33.2", "192.168.33.1") < 0) {
+        goto done;
+    }
+
+
+done:
+    free_nl(sk, cache);
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
     static struct option long_options[] = {
         { "root", no_argument, 0, 'r' },
         { 0,      0,           0, 0 }
@@ -88,28 +141,11 @@ int main(int argc, char *argv[]) {
         return 6;
     }
 
-    if (-1 == unshare(CLONE_NEWNET | CLONE_NEWUSER)) {
-        perror("unshare failed");
-        return 1;
+    int err;
+    if ((err = enter_namespace(become_fake_root))) {
+        return err;
     }
 
-    if (become_fake_root) {
-        /* according to util-linux' source,
-        * since Linux 3.19 unprivileged writing of /proc/self/gid_map
-        * has been disabled unless /proc/self/setgroups is written
-        * first to permanently disable the ability to call setgroups
-        * in that user namespace. */
-        int err;
-        if ((err = drop_setgroups())) {
-            return err;
-        }
-        if ((err = map_id("/proc/self/uid_map", 0, real_euid))) {
-            return err;
-        }
-        if ((err = map_id("/proc/self/gid_map", 0, real_egid))) {
-            return err;
-        }
-    }
     execvp(argv[optind], argv + optind);
     perror("couldn't execve");
 }
