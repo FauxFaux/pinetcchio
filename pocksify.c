@@ -11,6 +11,7 @@
 
 #include <getopt.h>
 
+#include <sys/prctl.h>
 #include <sys/types.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
@@ -63,16 +64,49 @@ static int map_id(const char *file, uint32_t from, uint32_t to) {
     return 0;
 }
 
+static int worker(int tun) {
+    int forked = fork();
+
+    if (forked < 0) {
+        return forked;
+    }
+
+    if (forked > 0) {
+        return 0;
+    }
+
+    //prctl(PR_SET_PDEATHSIG, SIGQUIT);
+
+    while (true) {
+        const int mtu_guess = 9188;
+        const int buf_size = mtu_guess+1;
+        unsigned char buf[buf_size];
+        ssize_t found = read(tun, buf, buf_size);
+        if (found < 0 || found > mtu_guess) {
+            perror("read from source");
+            return 1;
+        }
+
+        for (ssize_t i = 0; i < found; ++i) {
+            if (i % 16 == 0) {
+                printf("\nhurr durr imma snek: ");
+            }
+            printf("%02x ", buf[i]);
+        }
+        printf("\n");
+    }
+}
+
 static int enter_namespace(bool become_fake_root) {
+    uid_t real_euid = geteuid();
+    gid_t real_egid = getegid();
+
     if (-1 == unshare(CLONE_NEWNET | CLONE_NEWUSER)) {
         perror("unshare failed");
         return 1;
     }
 
     if (become_fake_root) {
-        uid_t real_euid = geteuid();
-        gid_t real_egid = getegid();
-
         /* according to util-linux' source,
         * since Linux 3.19 unprivileged writing of /proc/self/gid_map
         * has been disabled unless /proc/self/setgroups is written
@@ -96,22 +130,27 @@ static int enter_namespace(bool become_fake_root) {
     char child_tun_name[IFNAMSIZ] = "";
     int tun_child = tun_alloc(child_tun_name);
 
+    int err = 0;
     if (tun_child < 0) {
+        err = 2;
         goto done;
     }
 
     if (make_nl(&sk, &cache) < 0) {
+        err = 3;
         goto done;
     }
 
     if (set_addr(sk, cache, child_tun_name, "192.168.33.2", "192.168.33.1") < 0) {
+        err = 4;
         goto done;
     }
 
+    err = worker(tun_child);
 
 done:
     free_nl(sk, cache);
-    return 0;
+    return err;
 }
 
 int main(int argc, char *argv[]) {
