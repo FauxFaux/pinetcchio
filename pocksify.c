@@ -124,8 +124,8 @@ static int enter_namespace(bool become_fake_root) {
         }
     }
 
-    struct nl_sock *sk;
-    struct nl_cache *cache;
+    struct nl_sock *sk = NULL;
+    struct nl_cache *cache = NULL;
 
     char child_tun_name[IFNAMSIZ] = "";
     int tun_child = tun_alloc(child_tun_name);
