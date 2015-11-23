@@ -22,7 +22,6 @@
 #include "tun.h"
 
 static int drop_setgroups() {
-    const char *deny = "deny";
     FILE *fd = fopen("/proc/self/setgroups", "w");
 
     if (NULL == fd) {

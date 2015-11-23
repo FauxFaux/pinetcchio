@@ -30,7 +30,7 @@ static uint16_t read_uint16_t(const char *buf) {
            + (uint8_t) buf[1];
 }
 
-static void write_uint32_t(char *buf, uint16_t val) {
+static void write_uint32_t(char *buf, uint32_t val) {
     buf[0] = (char) (val >> 24) & 0xff;
     buf[1] = (char) (val >> 16) & 0xff;
     buf[2] = (char) (val >> 8) & 0xff;
@@ -83,6 +83,12 @@ struct waiting_port {
     struct port_data *value;
 };
 
+char *make_packet(char source_address[4],
+                  uint16_t source_port,
+                  char dest_address[4],
+                  uint16_t dest_port,
+                  uint32_t sequence_out);
+
 void tcp_free(struct tcb *tcb) {
     if (!tcb) {
         return;
@@ -107,6 +113,49 @@ void tcp_fd_set(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
     }
 }
 
+char *make_packet(char source_address[4],
+                  uint16_t source_port,
+                  char dest_address[4],
+                  uint16_t dest_port,
+                  uint32_t sequence_out) {
+
+    const size_t ip_size = 20;
+    const size_t tcp_size = 20;
+    const size_t total_size = ip_size + tcp_size;
+    char *ip = calloc(total_size, 1);
+
+    const uint8_t IPV4 = 0x40;
+    const uint8_t NO_EXTRA_HEADERS = 0x05;
+    const uint8_t MAX_TTL = 0xff;
+
+    ip[0] = IPV4 | NO_EXTRA_HEADERS;// Version concat IHL: number of extra headers
+    ip[2] = 0;                      // DSCP concat ECN: unused
+    ip[3] = total_size;
+    write_uint16_t(ip + 4, rand()); // identification: unclear what this is supposed to be
+    ip[6] = IP_FLAG_DONT_FRAGMENT;  // flags: disable fragmentation, which I believe is impossible on tun anyway,
+    // and mush the start of "fragmentation offset"
+    // 6 (last bits) and 7: fragmentation offset: 0
+    ip[8] = MAX_TTL;                // TTL
+    ip[9] = IP_PROTOCOL_TCP;        // Protocol number
+
+    memcpy(ip + 12, source_address, 4);
+    memcpy(ip + 16, dest_address, 4);
+
+    char *tcp = ip + ip_size;
+
+    write_uint16_t(tcp + 0, source_port);
+    write_uint16_t(tcp + 2, dest_port);
+    write_uint32_t(tcp + 4, sequence_out);
+    write_uint32_t(tcp + 8, 0);      // Sequence number we're ACKing.  TODO: unimplemented
+    tcp[12] = 0x50;                  // TCP header size concat reserved: Minimum 5: no options
+    tcp[13] = TCP_FLAG_SYN | TCP_FLAG_ACK; // Flags.
+    write_uint16_t(tcp + 14, 1460);  // window size; we're ignoring window scaling
+    // 16: TODO: checksum
+    // 18: urgent pointer (unused)
+
+    return ip;
+}
+
 void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
     for (struct waiting_port *curr = tcb->waiting;
          NULL != curr;
@@ -114,25 +163,13 @@ void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
         int writable = FD_ISSET(curr->value->upstream, wr_set);
         if (writable && CONN_SYN_RECIEVED == curr->value->conn_state) {
             // TODO connection accepted, time to ACK the client
-            char *ack = calloc(40, 1);
-            ack[0] = 0x45;
-            ack[2] = 0;
-            ack[3] = 40;
-            write_uint16_t(ack + 4, rand());
-            ack[6] = IP_FLAG_DONT_FRAGMENT;
-            ack[8] = (char) 0xff;
-            ack[9] = IP_PROTOCOL_TCP;
+            char *ack = make_packet(curr->value->source, curr->value->source_port,
+                                    curr->value->dest, curr->value->dest_port,
+                                    ++curr->value->sequence_out);
 
-            memcpy(ack + 12, curr->value->source, 4);
-            memcpy(ack + 16, curr->value->dest, 4);
+            // TODO: send it somewhere
 
-            write_uint16_t(ack + 20, curr->value->source_port);
-            write_uint16_t(ack + 22, curr->value->dest_port);
-            write_uint32_t(ack + 24, ++curr->value->sequence_out);
-            write_uint32_t(ack + 28, 0); // TODO acking
-            ack[32] = 0x50; // no options
-            ack[33] = TCP_FLAG_SYN | TCP_FLAG_ACK;
-            write_uint16_t(ack + 34, 1460);
+            free(ack);
         }
     }
 }
