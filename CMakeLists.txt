@@ -47,4 +47,5 @@ target_link_libraries(tests
         tap
         )
 
+enable_testing()
 add_test(COMMAND ./tests)

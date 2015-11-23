@@ -6,3 +6,8 @@ teleport
 tcpip_test
 pocksify
 tests
+Testing/
+CMake*
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
