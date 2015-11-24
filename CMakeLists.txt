@@ -13,11 +13,10 @@ if (LUA_FOUND)
     )
 
     add_executable(teleport
-            app.h
             teleport.c
             modifier.c
             tcpip.c
-            tun.c tun.h
+            tun.c
             )
 
     target_link_libraries(teleport
@@ -28,9 +27,8 @@ if (LUA_FOUND)
 endif (LUA_FOUND)
 
 add_executable(pocksify
-        app.h
         pocksify.c
-        tun.c tun.h
+        tun.c
         )
 
 target_link_libraries(pocksify

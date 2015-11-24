@@ -52,7 +52,7 @@ static uint32_t read_uint32_t(const char *buf) {
 
 enum conn_state {
     CONN_LISTENING,
-    CONN_SYN_RECIEVED,
+    CONN_SYN_RECEIVED,
 };
 
 struct port_data {
@@ -60,10 +60,8 @@ struct port_data {
     int seq_from_client;
     int seq_to_client;
     int offset;
-    int upstream;
-    char source[4];
+    int socks_socket;
     char dest[4];
-    uint16_t source_port;
     uint16_t dest_port;
     uint32_t sequence_out;
     enum conn_state conn_state;
@@ -96,7 +94,7 @@ void tcp_free(struct tcb *tcb) {
     free(tcb);
 }
 
-static void insert_waiting_port(struct tcb *tcb, struct port_data *port) {
+static void insert_waiting_for_upstream_port(struct tcb *tcb, struct port_data *port) {
     struct waiting_port *head = tcb->waiting;
     tcb->waiting = malloc(sizeof(struct waiting_port));
     tcb->waiting->next = head;
@@ -108,8 +106,8 @@ void tcp_fd_set(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
          NULL != curr;
          curr = curr->next) {
         // TODO read or write or whatever?
-        FD_SET(curr->value->upstream, rd_set);
-        FD_SET(curr->value->upstream, wr_set);
+        FD_SET(curr->value->socks_socket, rd_set);
+        FD_SET(curr->value->socks_socket, wr_set);
     }
 }
 
@@ -160,8 +158,8 @@ void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
     for (struct waiting_port *curr = tcb->waiting;
          NULL != curr;
          curr = curr->next) {
-        int writable = FD_ISSET(curr->value->upstream, wr_set);
-        if (writable && CONN_SYN_RECIEVED == curr->value->conn_state) {
+        int writable = FD_ISSET(curr->value->socks_socket, wr_set);
+        if (writable && CONN_SYN_RECEIVED == curr->value->conn_state) {
             // TODO connection accepted, time to ACK the client
             char *ack = make_packet(curr->value->source, curr->value->source_port,
                                     curr->value->dest, curr->value->dest_port,
@@ -217,22 +215,20 @@ void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
 
     if (main_flags & TCP_FLAG_SYN) {
                 tcp_assert(CONN_LISTENING == port->conn_state);
-        port->upstream = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-        assert(port->upstream > 0);
+        port->socks_socket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        assert(port->socks_socket > 0);
 
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(struct sockaddr_in));
-        if (connect(port->upstream,
+        if (connect(port->socks_socket,
                     (struct sockaddr *) &addr,
                     sizeof(struct sockaddr_in))) {
-            assert(EINPROGRESS == errno);
+                    tcp_assert(EINPROGRESS == errno);
         }
 
-        insert_waiting_port(tcb, port);
-        port->conn_state = CONN_SYN_RECIEVED;
-        memcpy(port->source, source_ip, 4);
+        insert_waiting_for_upstream_port(tcb, port);
+        port->conn_state = CONN_SYN_RECEIVED;
         memcpy(port->dest, dest_ip, 4);
-        port->source_port = source_port;
         port->dest_port = dest_port;
     }
 
