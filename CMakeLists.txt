@@ -17,7 +17,7 @@ if (LUA_FOUND)
             modifier.c
             tcpip.c
             tun.c
-            )
+            rope.c rope.h test_rope.c)
 
     target_link_libraries(teleport
             nl-3
@@ -41,9 +41,20 @@ add_executable(tests
         tcpip.c
         )
 
+add_executable(test_rope
+        test_rope.c
+        rope.c
+        )
+
 target_link_libraries(tests
         tap
         )
 
+target_link_libraries(test_rope
+        tap
+        )
+
+
 enable_testing()
 add_test(COMMAND ./tests)
+add_test(COMMAND ./test_rope)

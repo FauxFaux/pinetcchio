@@ -70,6 +70,7 @@ struct port_data {
 struct tcb {
     struct port_data ports[MAX_PORT];
     struct waiting_port *waiting;
+    char source[4];
 };
 
 struct tcb *tcp_alloc() {
@@ -79,6 +80,7 @@ struct tcb *tcp_alloc() {
 struct waiting_port {
     struct waiting_port *next;
     struct port_data *value;
+    uint16_t source_port;
 };
 
 char *make_packet(char source_address[4],
@@ -161,7 +163,7 @@ void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
         int writable = FD_ISSET(curr->value->socks_socket, wr_set);
         if (writable && CONN_SYN_RECEIVED == curr->value->conn_state) {
             // TODO connection accepted, time to ACK the client
-            char *ack = make_packet(curr->value->source, curr->value->source_port,
+            char *ack = make_packet(tcb->source, curr->source_port,
                                     curr->value->dest, curr->value->dest_port,
                                     ++curr->value->sequence_out);
 
