@@ -32,7 +32,7 @@ static void free_chunk(rope *what) {
 
 rope *rope_consume_internal(rope *from, char *restrict into, size_t left_to_read, size_t *read_so_far) {
     const uint16_t chunk_available = from->len - from->off;
-    uint8_t *const chunk_start = from->buf + from->off;
+    char *const chunk_start = from->buf + from->off;
 
     if (chunk_available >= left_to_read) {
         // we can fulfil it all from here

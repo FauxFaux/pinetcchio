@@ -7,12 +7,12 @@ typedef struct rope rope;
 
 struct rope {
     rope *next;
-    uint8_t *buf;
+    char *buf;
     uint16_t off;
     uint16_t len;
 };
 
-rope *rope_new_empty();
+rope *rope_new_empty(void);
 void rope_free(rope *what);
 void rope_append(rope *what, char *buf, uint16_t len);
 size_t rope_consume(rope **from, char *restrict into, size_t how_much);

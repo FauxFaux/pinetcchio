@@ -17,7 +17,7 @@ if (LUA_FOUND)
             modifier.c
             tcpip.c
             tun.c
-            rope.c rope.h test_rope.c)
+            rope.c)
 
     target_link_libraries(teleport
             nl-3

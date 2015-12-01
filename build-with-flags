@@ -1,0 +1,3 @@
+#!/bin/zsh
+(cd $(mktemp -d) && CC==clang ~/ins/clion-1.2.1/bin/cmake/bin/cmake -DCMAKE_C_FLAGS_INIT=-Weverything $OLDPWD && make clean && make)
+
