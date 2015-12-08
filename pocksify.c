@@ -23,6 +23,7 @@
 #include <assert.h>
 
 #include "tun.h"
+#include "app.h"
 
 static int drop_setgroups() {
     FILE *fd = fopen("/proc/self/setgroups", "w");
@@ -66,6 +67,46 @@ static int map_id(const char *file, uint32_t from, uint32_t to) {
     return 0;
 }
 
+void hex_dump(const char *buf, const ssize_t len) {
+    for (ssize_t i = 0; i < len; ++i) {
+        if (i % 16 == 0) {
+            printf("\nhurr durr imma snek: ");
+        }
+        printf("%02x ", (uint8_t) buf[i]);
+    }
+    printf("\n");
+}
+
+uint8_t protocol_of(char *base) {
+    return (uint8_t) base[9];
+}
+
+void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
+    *buf = uv_buf_init((char*) malloc(suggested_size), suggested_size);
+}
+
+struct pending_dns_query {
+    uv_buf_t buf;
+    uint16_t sport;
+};
+
+void on_write(uv_write_t* req, int status) {
+}
+
+void on_read(uv_stream_t* tcp, ssize_t nread, uv_buf_t *buf) {
+    printf("a response\n");
+    hex_dump(buf->base, nread);
+}
+
+void on_connect(uv_connect_t* connection, int status) {
+    uv_stream_t* stream = connection->handle;
+
+    uv_write_t request;
+
+    uv_write(&request, stream, &((struct pending_dns_query*)connection->data)->buf, 1, on_write);
+    uv_read_start(stream, alloc_buffer, on_read);
+}
+
 void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread < 0){
         if (nread == UV_EOF){
@@ -78,22 +119,50 @@ void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         return;
     }
 
-    for (ssize_t i = 0; i < nread; ++i) {
-        if (i % 16 == 0) {
-            printf("\nhurr durr imma snek: ");
-        }
-        printf("%02x ", (uint8_t) buf->base[i]);
+    assert(nread > 20);
+    
+    switch (protocol_of(buf->base)) {
+        case IPPROTO_UDP: {
+            uint16_t sport, dport, len;
+            const char *udp = extract_udp(buf->base, nread, &sport, &dport, &len);
+            printf("udp: %d %d %d\n", sport, dport, len);
+
+            switch (dport) {
+                case 53: { // DNS yolo
+                    uv_tcp_t* socket = malloc(sizeof(uv_tcp_t));
+                    assert(socket);
+                    uv_tcp_init(uv_default_loop(), socket);
+
+                    uv_connect_t* connect = malloc(sizeof(uv_connect_t));
+                    struct sockaddr_in dest;
+                    uv_ip4_addr("8.8.4.4", 53, &dest);
+
+                    struct pending_dns_query pending;
+                    pending.buf.base = udp;
+                    pending.buf.len = len;
+                    pending.sport = sport;
+                    // whatevs
+
+                    uv_tcp_connect(connect, socket, (const struct sockaddr*)&dest, on_connect);
+                } break;
+                default:
+                    printf("unknown udp traffic\n");
+                    hex_dump(udp, len);
+                    break;
+            }
+        } break;
+        default:
+            printf("unknown traffic type\n");
+            hex_dump(buf->base, nread);
+            break;
     }
-    printf("\n");
+
 
     if (buf->base) {
         free(buf->base);
     }
 }
 
-void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
-    *buf = uv_buf_init((char*) malloc(suggested_size), suggested_size);
-}
 
 static int worker(int tun) {
     int forked = fork();

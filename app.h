@@ -25,3 +25,4 @@ void tcp_free(struct tcb *tcb);
 void tcp_fd_set(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set);
 void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set);
 
+const char * extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *dport, uint16_t *length);

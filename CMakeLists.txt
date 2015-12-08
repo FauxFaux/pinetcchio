@@ -29,7 +29,10 @@ endif (LUA_FOUND)
 add_executable(pocksify
         pocksify.c
         tun.c
+        tcpip.c
         )
+
+set_property(TARGET pocksify PROPERTY C_STANDARD 11)
 
 target_link_libraries(pocksify
         nl-3

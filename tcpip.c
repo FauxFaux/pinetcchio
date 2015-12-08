@@ -174,11 +174,13 @@ void tcp_fd_consume(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
     }
 }
 
+int header_length(const char *buf) { return (buf[0] & 0x0f) * 32 / 8; }
+
 void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
-            tcp_assert(top_4_bits(buf[0]) == 4);
-    const uint16_t ip_header_length = (buf[0] & 0x0f) * 32 / 8;
-            tcp_assert(ip_header_length == 20);
     assert(len > 20);
+    tcp_assert(top_4_bits(buf[0]) == 4);
+    const uint16_t ip_header_length = header_length(buf);
+    tcp_assert(ip_header_length == 20);
 
     // buf[1]: DSCP / ECN: unsupported
     const uint16_t ip_total_length = read_uint16_t(buf + 2);
@@ -237,3 +239,19 @@ void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
     const char *data = buf + tcp_header_length;
 }
 
+const char *extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *dport, uint16_t *length) {
+    tcp_assert(len > 20);
+    tcp_assert(top_4_bits(buf[0]) == 4);
+    const uint16_t ip_header_length = header_length(buf);
+    tcp_assert(ip_header_length == 20);
+
+    // ignore the whole ip header
+
+    buf += ip_header_length;
+    *sport = read_uint16_t(buf+0);
+    *dport = read_uint16_t(buf+2);
+    *length = read_uint16_t(buf+4);
+
+    buf += 8;
+    return buf;
+}
