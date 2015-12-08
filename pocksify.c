@@ -19,6 +19,9 @@
 #include <netinet/in.h>
 #include <linux/if.h>
 
+#include <uv.h>
+#include <assert.h>
+
 #include "tun.h"
 
 static int drop_setgroups() {
@@ -63,6 +66,35 @@ static int map_id(const char *file, uint32_t from, uint32_t to) {
     return 0;
 }
 
+void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    if (nread < 0){
+        if (nread == UV_EOF){
+            // TODO: end of file
+//            uv_close((uv_handle_t *)&stdin_pipe, NULL);
+        }
+        return;
+    }
+    if (nread == 0) {
+        return;
+    }
+
+    for (ssize_t i = 0; i < nread; ++i) {
+        if (i % 16 == 0) {
+            printf("\nhurr durr imma snek: ");
+        }
+        printf("%02x ", (uint8_t) buf->base[i]);
+    }
+    printf("\n");
+
+    if (buf->base) {
+        free(buf->base);
+    }
+}
+
+void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
+    *buf = uv_buf_init((char*) malloc(suggested_size), suggested_size);
+}
+
 static int worker(int tun) {
     int forked = fork();
 
@@ -76,24 +108,22 @@ static int worker(int tun) {
 
     //prctl(PR_SET_PDEATHSIG, SIGQUIT);
 
-    while (true) {
-        const int mtu_guess = 9188;
-        const int buf_size = mtu_guess+1;
-        unsigned char buf[buf_size];
-        ssize_t found = read(tun, buf, buf_size);
-        if (found < 0 || found > mtu_guess) {
-            perror("read from source");
-            return 1;
-        }
+    uv_loop_t *loop = malloc(sizeof(uv_loop_t));
+    assert(loop);
+    uv_loop_init(loop);
 
-        for (ssize_t i = 0; i < found; ++i) {
-            if (i % 16 == 0) {
-                printf("\nhurr durr imma snek: ");
-            }
-            printf("%02x ", buf[i]);
-        }
-        printf("\n");
-    }
+    uv_pipe_t *tun_pipe = malloc(sizeof(uv_pipe_t));
+    assert(tun_pipe);
+    uv_pipe_init(uv_default_loop(), tun_pipe, false);
+    uv_pipe_open(tun_pipe, tun);
+    uv_read_start(tun_pipe, alloc_buffer, tun_read);
+
+    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+
+    uv_loop_close(uv_default_loop());
+    free(loop);
+
+    return 0;
 }
 
 static int enter_namespace(bool become_fake_root) {

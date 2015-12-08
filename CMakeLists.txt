@@ -34,6 +34,7 @@ add_executable(pocksify
 target_link_libraries(pocksify
         nl-3
         nl-route-3
+        uv
         )
 
 add_executable(tests
