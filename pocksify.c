@@ -123,16 +123,18 @@ void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
 
     assert(len == (nread - 2));
 
+    hex_dump(buf->base, nread);
+
     uv_stream_t *to_captive = uv_default_loop()->data;
     uv_buf_t resp = { calloc(len + 20 + 8, 1), len + 20 + 8};
     struct pending_dns_query *pending = (struct pending_dns_query*)tcp->data;
     make_udp(resp.base,
-             pending->dest_address,
              pending->source_address,
+             pending->dest_address,
              pending->sport, 53, buf->base + 2, nread - 2);
     uv_req_t request;
 
-    uv_write(&request, to_captive, &buf, 1, NULL);
+    uv_write(&request, to_captive, &resp, 1, NULL);
 
 //    hex_dump(buf->base, nread);
 }
@@ -161,6 +163,7 @@ void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
     }
 
     printf("%zd bytes are being bridged from %p to %p\n", nread, stream, stream->data);
+    hex_dump(buf->base, nread);
 
     uv_write_t req;
     uv_write(&req, stream->data, buf, 1, NULL);
@@ -277,7 +280,7 @@ static int worker(int tun_fd, int escape_namespace_fd) {
     uv_read_start(tun_pipe, alloc_buffer, uread_copy_to_data);
 
     escape_pipe->data = tun_pipe;
-//    uv_read_start(escape_pipe, alloc_buffer, uread_copy_to_data);
+    uv_read_start(escape_pipe, alloc_buffer, uread_copy_to_data);
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
@@ -397,19 +400,15 @@ int main(int argc, char *argv[]) {
         return 6;
     }
 
-    char buf[64];
-    tmpdir(buf);
-    strcat(buf, "/escape");
-    assert(!mkfifo(buf, 0700));
-    int escape_namespace_fd = open(buf, O_RDWR);
-    assert(escape_namespace_fd >= 0);
+    int escape_fds[2];
+    assert(0 == socketpair(AF_UNIX, SOCK_SEQPACKET, AF_UNIX, escape_fds));
 
     int err;
-    if ((err = copy_out_of_namespace(escape_namespace_fd))) {
+    if ((err = copy_out_of_namespace(escape_fds[0]))) {
         return err;
     }
 
-    if ((err = enter_namespace(become_fake_root, escape_namespace_fd))) {
+    if ((err = enter_namespace(become_fake_root, escape_fds[1]))) {
         return err;
     }
 
