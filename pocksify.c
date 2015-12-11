@@ -96,17 +96,45 @@ void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 struct pending_dns_query {
     uv_buf_t buf;
     uint16_t sport;
+    char source_address[4];
+    char dest_address[4];
 };
 
 void on_write(uv_write_t* req, int status) {
 }
 
-void on_read(uv_stream_t* tcp, ssize_t nread, uv_buf_t *buf) {
+void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
     printf("a response %zd\n", nread);
+
     if (nread < 0) {
+        if (UV_EOF == nread) {
+            uv_close((uv_handle_t*) tcp, NULL);
+            return;
+        }
+
         printf("%s\n", uv_strerror(nread));
+        return;
     }
-    hex_dump(buf->base, nread);
+//    rope *r = rope_new_empty();
+//    rope_append(r, buf->base, buf->len);
+//    rope_consume()
+    assert(0 == buf->base[0]);
+    uint8_t len = buf->base[1];
+
+    assert(len == (nread - 2));
+
+    uv_stream_t *to_captive = uv_default_loop()->data;
+    uv_buf_t resp = { calloc(len + 20 + 8, 1), len + 20 + 8};
+    struct pending_dns_query *pending = (struct pending_dns_query*)tcp->data;
+    make_udp(resp.base,
+             pending->dest_address,
+             pending->source_address,
+             pending->sport, 53, buf->base + 2, nread - 2);
+    uv_req_t request;
+
+    uv_write(&request, to_captive, &buf, 1, NULL);
+
+//    hex_dump(buf->base, nread);
 }
 
 void on_connect(uv_connect_t* connection, int status) {
@@ -114,23 +142,25 @@ void on_connect(uv_connect_t* connection, int status) {
 
     uv_write_t request;
 
-    struct pending_dns_query *pending = (struct pending_dns_query*)connection->data;
+    struct pending_dns_query *pending = (struct pending_dns_query*)stream->data;
     printf("connected, writing %p, %lu\n", pending, pending->buf.len);
     uv_write(&request, stream, &pending->buf, 1, on_write);
-    uv_read_start(stream, alloc_buffer, on_read);
+    uv_read_start(stream, alloc_buffer, on_read_tcp_response);
 }
 
-void tun_to_escape_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread < 0) {
         if (nread == UV_EOF) {
-            // TODO: end of file
-//            uv_close((uv_handle_t *)&stdin_pipe, NULL);
+//            uv_close((uv_handle_t *)stream, NULL);
         }
         return;
     }
+
     if (nread == 0) {
         return;
     }
+
+    printf("%zd bytes are being bridged from %p to %p\n", nread, stream, stream->data);
 
     uv_write_t req;
     uv_write(&req, stream->data, buf, 1, NULL);
@@ -144,6 +174,7 @@ char *memdup(const char *udp, size_t len) {
 }
 
 void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    printf("%zd bytes in a %zu buffer arrived for destructing\n", nread, buf->len);
     if (nread < 0){
         if (nread == UV_EOF){
             // TODO: end of file
@@ -155,12 +186,15 @@ void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
         return;
     }
 
+//    hex_dump(buf->base, nread);
+
     assert(nread > 20);
     
     switch (protocol_of(buf->base)) {
         case IPPROTO_UDP: {
             uint16_t sport, dport, len;
-            const char *udp = extract_udp(buf->base, nread, &sport, &dport, &len);
+            char source_address[4], dest_address[4];
+            const char *udp = extract_udp(buf->base, nread, &sport, &dport, &len, source_address, dest_address);
             printf("udp: %d %d %d\n", sport, dport, len);
 
             switch (dport) {
@@ -182,8 +216,10 @@ void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 
                     pending->buf.len = len - 8 + 2;
                     pending->sport = sport;
-                    // whatevs
-                    connect->data = pending;
+                    memcpy(pending->source_address, source_address, 4);
+                    memcpy(pending->dest_address, dest_address, 4);
+
+                    socket->data = pending;
 
                     uv_tcp_connect(connect, socket, (const struct sockaddr*)&dest, on_connect);
                 } break;
@@ -235,8 +271,13 @@ static int worker(int tun_fd, int escape_namespace_fd) {
     uv_pipe_t *tun_pipe = pipe_to_fd(tun_fd);
     uv_pipe_t *escape_pipe = pipe_to_fd(escape_namespace_fd);
 
+    printf("tun: %p escape: %p\n", tun_pipe, escape_pipe);
+
     tun_pipe->data = escape_pipe;
-    uv_read_start(tun_pipe, alloc_buffer, tun_to_escape_read);
+    uv_read_start(tun_pipe, alloc_buffer, uread_copy_to_data);
+
+    escape_pipe->data = tun_pipe;
+//    uv_read_start(escape_pipe, alloc_buffer, uread_copy_to_data);
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
@@ -317,18 +358,16 @@ static int copy_out_of_namespace(int escape_namespace_fd) {
 
     fclose(stdin);
 
-    uv_loop_t *loop = malloc(sizeof(uv_loop_t));
-    assert(loop);
-    uv_loop_init(loop);
 
     uv_pipe_t *pipe = pipe_to_fd(escape_namespace_fd);
+    uv_default_loop()->data = pipe;
     uv_read_start(pipe, alloc_buffer, read_tcp);
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     uv_loop_close(uv_default_loop());
-    free(loop);
 
+    return 0;
 }
 
 int main(int argc, char *argv[]) {

@@ -10,6 +10,7 @@
 
 #define tcp_assert assert
 static const uint8_t IP_PROTOCOL_TCP = 6;
+static const uint8_t IP_PROTOCOL_UDP = 17;
 static const uint8_t IP_FLAG_DONT_FRAGMENT = 1 << 6;
 static const uint8_t IP_FLAG_MORE_FRAGMENTS = 1 << 5;
 
@@ -113,6 +114,27 @@ void tcp_fd_set(struct tcb *tcb, fd_set *rd_set, fd_set *wr_set) {
     }
 }
 
+void make_ip(char *ip,
+             const char *source_address, const char *dest_address,
+             const uint16_t total_size, uint8_t protocol_number) {
+    const uint8_t IPV4 = 0x40;
+    const uint8_t NO_EXTRA_HEADERS = 0x05;
+    const uint8_t MAX_TTL = 0xff;
+
+    ip[0] = IPV4 | NO_EXTRA_HEADERS;// Version concat IHL: number of extra headers
+                                    // DSCP concat ECN: unused
+    write_uint16_t(ip + 2, total_size);
+    write_uint16_t(ip + 4, rand()); // identification: unclear what this is supposed to be
+    ip[6] = IP_FLAG_DONT_FRAGMENT;  // flags: disable fragmentation, which I believe is impossible on tun anyway,
+    // and mush the start of "fragmentation offset"
+    // 6 (last bits) and 7: fragmentation offset: 0
+    ip[8] = MAX_TTL;                // TTL
+    ip[9] = protocol_number;        // Protocol number
+
+    memcpy(ip + 12, source_address, 4);
+    memcpy(ip + 16, dest_address, 4);
+}
+
 char *make_packet(char source_address[4],
                   uint16_t source_port,
                   char dest_address[4],
@@ -124,22 +146,7 @@ char *make_packet(char source_address[4],
     const size_t total_size = ip_size + tcp_size;
     char *ip = calloc(total_size, 1);
 
-    const uint8_t IPV4 = 0x40;
-    const uint8_t NO_EXTRA_HEADERS = 0x05;
-    const uint8_t MAX_TTL = 0xff;
-
-    ip[0] = IPV4 | NO_EXTRA_HEADERS;// Version concat IHL: number of extra headers
-    ip[2] = 0;                      // DSCP concat ECN: unused
-    ip[3] = total_size;
-    write_uint16_t(ip + 4, rand()); // identification: unclear what this is supposed to be
-    ip[6] = IP_FLAG_DONT_FRAGMENT;  // flags: disable fragmentation, which I believe is impossible on tun anyway,
-    // and mush the start of "fragmentation offset"
-    // 6 (last bits) and 7: fragmentation offset: 0
-    ip[8] = MAX_TTL;                // TTL
-    ip[9] = IP_PROTOCOL_TCP;        // Protocol number
-
-    memcpy(ip + 12, source_address, 4);
-    memcpy(ip + 16, dest_address, 4);
+    make_ip(ip, source_address, dest_address, total_size, IP_PROTOCOL_TCP);
 
     char *tcp = ip + ip_size;
 
@@ -239,11 +246,15 @@ void tcp_consume(struct tcb *tcb, const char *buf, size_t len) {
     const char *data = buf + tcp_header_length;
 }
 
-const char *extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *dport, uint16_t *length) {
+const char *extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *dport, uint16_t *length,
+                        char *source_address, char *dest_address) {
     tcp_assert(len > 20);
     tcp_assert(top_4_bits(buf[0]) == 4);
     const uint16_t ip_header_length = header_length(buf);
     tcp_assert(ip_header_length == 20);
+
+    memcpy(source_address, buf+12, 4);
+    memcpy(dest_address,   buf+16, 4);
 
     // ignore the whole ip header
 
@@ -254,4 +265,25 @@ const char *extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *
 
     buf += 8;
     return buf;
+}
+
+void make_udp(char *buf,
+              const char *source_address, const char *dest_address,
+              uint16_t sport, uint16_t dport,
+              const char *data, size_t data_len);
+
+void make_udp(char *buf,
+              const char *source_address, const char *dest_address,
+              uint16_t sport, uint16_t dport,
+              const char *data, size_t data_len) {
+    assert(data_len < 65507);
+
+    make_ip(buf, source_address, dest_address, 40 + data_len, IP_PROTOCOL_UDP);
+    buf += 20;
+    write_uint16_t(buf + 0, sport);
+    write_uint16_t(buf + 2, dport);
+    write_uint16_t(buf + 4, data_len + 8);
+    write_uint16_t(buf + 6, 0); // checksum
+
+    memcpy(buf + 8, data, data_len);
 }
