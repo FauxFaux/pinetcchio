@@ -21,9 +21,17 @@
 
 #include <uv.h>
 #include <assert.h>
+#include <string.h>
 
 #include "tun.h"
 #include "app.h"
+
+static void tmpdir(char *buf) {
+    char *sock_dir = strdup("/tmp/pocksify.XXXXXX");
+    assert(mkdtemp(sock_dir));
+    strcpy(buf, sock_dir);
+    free(sock_dir);
+}
 
 static int drop_setgroups() {
     FILE *fd = fopen("/proc/self/setgroups", "w");
@@ -94,7 +102,10 @@ void on_write(uv_write_t* req, int status) {
 }
 
 void on_read(uv_stream_t* tcp, ssize_t nread, uv_buf_t *buf) {
-    printf("a response\n");
+    printf("a response %zd\n", nread);
+    if (nread < 0) {
+        printf("%s\n", uv_strerror(nread));
+    }
     hex_dump(buf->base, nread);
 }
 
@@ -103,11 +114,36 @@ void on_connect(uv_connect_t* connection, int status) {
 
     uv_write_t request;
 
-    uv_write(&request, stream, &((struct pending_dns_query*)connection->data)->buf, 1, on_write);
+    struct pending_dns_query *pending = (struct pending_dns_query*)connection->data;
+    printf("connected, writing %p, %lu\n", pending, pending->buf.len);
+    uv_write(&request, stream, &pending->buf, 1, on_write);
     uv_read_start(stream, alloc_buffer, on_read);
 }
 
-void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+void tun_to_escape_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    if (nread < 0) {
+        if (nread == UV_EOF) {
+            // TODO: end of file
+//            uv_close((uv_handle_t *)&stdin_pipe, NULL);
+        }
+        return;
+    }
+    if (nread == 0) {
+        return;
+    }
+
+    uv_write_t req;
+    uv_write(&req, stream->data, buf, 1, NULL);
+}
+
+char *memdup(const char *udp, size_t len) {
+    char *ret = malloc(len);
+    assert(ret);
+    memcpy(ret, udp, len);
+    return ret;
+}
+
+void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     if (nread < 0){
         if (nread == UV_EOF){
             // TODO: end of file
@@ -137,11 +173,17 @@ void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
                     struct sockaddr_in dest;
                     uv_ip4_addr("8.8.4.4", 53, &dest);
 
-                    struct pending_dns_query pending;
-                    pending.buf.base = udp;
-                    pending.buf.len = len;
-                    pending.sport = sport;
+                    struct pending_dns_query *pending = calloc(sizeof(struct pending_dns_query), 1);
+                    pending->buf.base = malloc(2 + len); // over-allocated
+                    assert(pending->buf.base);
+                    pending->buf.base[0] = 0; // TODO: YOLO
+                    pending->buf.base[1] = (uint8_t) (len - 8);
+                    memcpy(pending->buf.base + 2, udp, len - 8 + 2);
+
+                    pending->buf.len = len - 8 + 2;
+                    pending->sport = sport;
                     // whatevs
+                    connect->data = pending;
 
                     uv_tcp_connect(connect, socket, (const struct sockaddr*)&dest, on_connect);
                 } break;
@@ -164,7 +206,15 @@ void tun_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 }
 
 
-static int worker(int tun) {
+static uv_pipe_t *pipe_to_fd(int fd) {
+    uv_pipe_t *pipe = malloc(sizeof(uv_pipe_t));
+    assert(pipe);
+    uv_pipe_init(uv_default_loop(), pipe, false);
+    uv_pipe_open(pipe, fd);
+    return pipe;
+}
+
+static int worker(int tun_fd, int escape_namespace_fd) {
     int forked = fork();
 
     if (forked < 0) {
@@ -176,16 +226,17 @@ static int worker(int tun) {
     }
 
     //prctl(PR_SET_PDEATHSIG, SIGQUIT);
+    fclose(stdin);
 
     uv_loop_t *loop = malloc(sizeof(uv_loop_t));
     assert(loop);
     uv_loop_init(loop);
 
-    uv_pipe_t *tun_pipe = malloc(sizeof(uv_pipe_t));
-    assert(tun_pipe);
-    uv_pipe_init(uv_default_loop(), tun_pipe, false);
-    uv_pipe_open(tun_pipe, tun);
-    uv_read_start(tun_pipe, alloc_buffer, tun_read);
+    uv_pipe_t *tun_pipe = pipe_to_fd(tun_fd);
+    uv_pipe_t *escape_pipe = pipe_to_fd(escape_namespace_fd);
+
+    tun_pipe->data = escape_pipe;
+    uv_read_start(tun_pipe, alloc_buffer, tun_to_escape_read);
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
@@ -195,7 +246,7 @@ static int worker(int tun) {
     return 0;
 }
 
-static int enter_namespace(bool become_fake_root) {
+static int enter_namespace(bool become_fake_root, int escape_namespace_fd) {
     uid_t real_euid = geteuid();
     gid_t real_egid = getegid();
 
@@ -227,6 +278,7 @@ static int enter_namespace(bool become_fake_root) {
 
     char child_tun_name[IFNAMSIZ] = "";
     int tun_child = tun_alloc(child_tun_name);
+    printf("child tun: %s\n", child_tun_name);
 
     int err = 0;
     if (tun_child < 0) {
@@ -244,11 +296,39 @@ static int enter_namespace(bool become_fake_root) {
         goto done;
     }
 
-    err = worker(tun_child);
+    err = worker(tun_child, escape_namespace_fd);
 
 done:
     free_nl(sk, cache);
     return err;
+}
+
+static int copy_out_of_namespace(int escape_namespace_fd) {
+    pid_t worker = fork();
+    if (worker > 0) {
+        // parent
+        return 0;
+    }
+
+    if (worker < 0) {
+        // error
+        return worker;
+    }
+
+    fclose(stdin);
+
+    uv_loop_t *loop = malloc(sizeof(uv_loop_t));
+    assert(loop);
+    uv_loop_init(loop);
+
+    uv_pipe_t *pipe = pipe_to_fd(escape_namespace_fd);
+    uv_read_start(pipe, alloc_buffer, read_tcp);
+
+    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+
+    uv_loop_close(uv_default_loop());
+    free(loop);
+
 }
 
 int main(int argc, char *argv[]) {
@@ -278,12 +358,22 @@ int main(int argc, char *argv[]) {
         return 6;
     }
 
+    char buf[64];
+    tmpdir(buf);
+    strcat(buf, "/escape");
+    assert(!mkfifo(buf, 0700));
+    int escape_namespace_fd = open(buf, O_RDWR);
+    assert(escape_namespace_fd >= 0);
+
     int err;
-    if ((err = enter_namespace(become_fake_root))) {
+    if ((err = copy_out_of_namespace(escape_namespace_fd))) {
+        return err;
+    }
+
+    if ((err = enter_namespace(become_fake_root, escape_namespace_fd))) {
         return err;
     }
 
     execvp(argv[optind], argv + optind);
     perror("couldn't execve");
 }
-
