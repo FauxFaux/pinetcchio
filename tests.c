@@ -1,12 +1,19 @@
 #include <tap.h>
 #include "app.h"
 
-#include "t/tcpip.c"
+void test_ip_checksum() {
+    char buf[] = {0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00,
+                  0x40, 0x11, 0x10, 0x20, 0xc0, 0xa8, 0x00, 0x01,
+                  0xc0, 0xa8, 0x00, 0xc7};
+    set_ip_checksum(buf);
+    cmp_ok(buf[10], "==", (char)0xb8);
+    cmp_ok(buf[11], "==", (char)0x61);
+}
 
 int main() {
-    plan(1);
+    plan(2);
 
-    test_tcpip();
+    test_ip_checksum();
 
     done_testing();
 }

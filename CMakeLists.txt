@@ -38,6 +38,7 @@ target_link_libraries(pocksify
         nl-3
         nl-route-3
         uv
+        pcap
         )
 
 add_executable(tests

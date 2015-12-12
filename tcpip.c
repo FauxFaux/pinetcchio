@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <stdio.h>
 
 #include "app.h"
 
@@ -133,6 +134,8 @@ void make_ip(char *ip,
 
     memcpy(ip + 12, source_address, 4);
     memcpy(ip + 16, dest_address, 4);
+
+    set_ip_checksum(ip);
 }
 
 char *make_packet(char source_address[4],
@@ -267,10 +270,34 @@ const char *extract_udp(const char *buf, size_t len, uint16_t *sport, uint16_t *
     return buf;
 }
 
-void make_udp(char *buf,
-              const char *source_address, const char *dest_address,
-              uint16_t sport, uint16_t dport,
-              const char *data, size_t data_len);
+void set_ip_checksum(char *buf) {
+    uint64_t sum = 0;
+    uint16_t *as_words = (uint16_t *)buf;
+
+    as_words[5] = 0;
+
+    int hdr_len = 20;
+    while (hdr_len > 1) {
+        sum += *as_words++;
+        if (sum & 0x80000000) {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        hdr_len -= 2;
+    }
+
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    ((uint16_t*)buf)[5] = (uint16_t) ~sum;
+}
+
+void set_udp_checksum_on_ip(char *buf) {
+    uint64_t sum = 0;
+    uint16_t *as_words = (uint16_t *)buf;
+
+    // TODO
+}
 
 void make_udp(char *buf,
               const char *source_address, const char *dest_address,
@@ -286,4 +313,5 @@ void make_udp(char *buf,
     write_uint16_t(buf + 6, 0); // checksum
 
     memcpy(buf + 8, data, data_len);
+    set_udp_checksum_on_ip(buf);
 }

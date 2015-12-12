@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 // unistd needed for ssize_t
 #include <unistd.h>
 
@@ -32,3 +34,5 @@ void make_udp(char *buf,
               const char *source_address, const char *dest_address,
               uint16_t sport, uint16_t dport,
               const char *data, size_t data_len);
+
+void set_ip_checksum(char *buf);

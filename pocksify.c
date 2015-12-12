@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,8 +24,12 @@
 #include <assert.h>
 #include <string.h>
 
+#include <pcap/pcap.h>
+
 #include "tun.h"
 #include "app.h"
+
+static const uint64_t TAG = 0x1234567890;
 
 static void tmpdir(char *buf) {
     char *sock_dir = strdup("/tmp/pocksify.XXXXXX");
@@ -78,7 +83,7 @@ static int map_id(const char *file, uint32_t from, uint32_t to) {
 void hex_dump(const char *buf, const ssize_t len) {
     for (ssize_t i = 0; i < len; ++i) {
         if (i % 16 == 0) {
-            printf("\nhurr durr imma snek: ");
+            printf("\nhexdump: ");
         }
         printf("%02x ", (uint8_t) buf[i]);
     }
@@ -90,7 +95,7 @@ uint8_t protocol_of(char *base) {
 }
 
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
-    *buf = uv_buf_init((char*) malloc(suggested_size), suggested_size);
+    *buf = uv_buf_init((char*) calloc(1, suggested_size), suggested_size);
 }
 
 struct pending_dns_query {
@@ -104,7 +109,7 @@ void on_write(uv_write_t* req, int status) {
 }
 
 void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
-    printf("a response %zd\n", nread);
+    printf("outside-worker: a response of %zd bytes being sent back to the captive\n", nread);
 
     if (nread < 0) {
         if (UV_EOF == nread) {
@@ -129,11 +134,14 @@ void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
     uv_buf_t resp = { calloc(len + 20 + 8, 1), len + 20 + 8};
     struct pending_dns_query *pending = (struct pending_dns_query*)tcp->data;
     make_udp(resp.base,
-             pending->source_address,
              pending->dest_address,
+             pending->source_address,
              pending->sport, 53, buf->base + 2, nread - 2);
-    uv_req_t request;
+    uv_req_t request = {};
 
+    assert(to_captive);
+    assert(resp.base);
+    assert(resp.len);
     uv_write(&request, to_captive, &resp, 1, NULL);
 
 //    hex_dump(buf->base, nread);
@@ -150,7 +158,16 @@ void on_connect(uv_connect_t* connection, int status) {
     uv_read_start(stream, alloc_buffer, on_read_tcp_response);
 }
 
+struct dumpable_pipe {
+    uint64_t tag;
+    uv_pipe_t *pipe;
+    pcap_dumper_t *dumper;
+};
+
 void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    struct dumpable_pipe *dumpable = stream->data;
+    printf("outside-worker: %zd bytes are being bridged from %p to %p\n", nread, stream, dumpable->pipe);
+
     if (nread < 0) {
         if (nread == UV_EOF) {
 //            uv_close((uv_handle_t *)stream, NULL);
@@ -162,11 +179,29 @@ void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
         return;
     }
 
-    printf("%zd bytes are being bridged from %p to %p\n", nread, stream, stream->data);
+
+    assert(buf->base);
+
+    printf("outside-worker: data == %p\n", dumpable);
+    printf("outside-worker: data->tag == %lu\n", dumpable->tag);
+
     hex_dump(buf->base, nread);
 
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    struct pcap_pkthdr header = {.caplen = nread, .len = nread, .ts= now};
+    printf("outside-worker: pcap_dump(%p, %p, %p);\n", dumpable->dumper, &header, buf->base);
+    pcap_dump(dumpable->dumper, &header, buf->base);
+
+    printf("outside-worker: dumping\n");
+
+    pcap_dump_flush(dumpable->dumper);
+
+    printf("outside-worker: dumped\n");
+
     uv_write_t req;
-    uv_write(&req, stream->data, buf, 1, NULL);
+    uv_write(&req, dumpable->pipe, buf, 1, NULL);
+    printf("outside-worker: written\n");
 }
 
 char *memdup(const char *udp, size_t len) {
@@ -178,8 +213,8 @@ char *memdup(const char *udp, size_t len) {
 
 void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     printf("%zd bytes in a %zu buffer arrived for destructing\n", nread, buf->len);
-    if (nread < 0){
-        if (nread == UV_EOF){
+    if (nread < 0) {
+        if (nread == UV_EOF) {
             // TODO: end of file
 //            uv_close((uv_handle_t *)&stdin_pipe, NULL);
         }
@@ -192,7 +227,7 @@ void read_tcp(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
 //    hex_dump(buf->base, nread);
 
     assert(nread > 20);
-    
+
     switch (protocol_of(buf->base)) {
         case IPPROTO_UDP: {
             uint16_t sport, dport, len;
@@ -267,25 +302,40 @@ static int worker(int tun_fd, int escape_namespace_fd) {
     //prctl(PR_SET_PDEATHSIG, SIGQUIT);
     fclose(stdin);
 
-    uv_loop_t *loop = malloc(sizeof(uv_loop_t));
-    assert(loop);
-    uv_loop_init(loop);
-
     uv_pipe_t *tun_pipe = pipe_to_fd(tun_fd);
     uv_pipe_t *escape_pipe = pipe_to_fd(escape_namespace_fd);
 
     printf("tun: %p escape: %p\n", tun_pipe, escape_pipe);
 
-    tun_pipe->data = escape_pipe;
+    pcap_t *pcap = pcap_open_dead(DLT_RAW, 65536);
+    assert(pcap);
+    pcap_dumper_t *pdumper = pcap_dump_open(pcap, "/tmp/capture.pcap");
+    assert(pdumper);
+
+    struct dumpable_pipe *tun_dump = malloc(sizeof(struct dumpable_pipe));
+    tun_dump->tag = TAG;
+    tun_dump->pipe = tun_pipe;
+    tun_dump->dumper = pdumper;
+
+    struct dumpable_pipe *escape_dump = malloc(sizeof(struct dumpable_pipe));
+    escape_dump->tag = TAG;
+    escape_dump->pipe = escape_pipe;
+    escape_dump->dumper = pdumper;
+
+    tun_pipe->data = escape_dump;
+    printf("tun_pipe->data == %p\n", tun_pipe->data);
     uv_read_start(tun_pipe, alloc_buffer, uread_copy_to_data);
 
-    escape_pipe->data = tun_pipe;
+    escape_pipe->data = tun_dump;
+    printf("escape_pipe->data == %p\n", escape_pipe->data);
     uv_read_start(escape_pipe, alloc_buffer, uread_copy_to_data);
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     uv_loop_close(uv_default_loop());
-    free(loop);
+
+    pcap_close(pcap);
+    pcap_dump_close(pdumper);
 
     return 0;
 }
