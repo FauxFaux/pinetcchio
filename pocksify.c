@@ -136,8 +136,8 @@ void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
     make_udp(resp.base,
              pending->dest_address,
              pending->source_address,
-             pending->sport, 53, buf->base + 2, nread - 2);
-    uv_req_t request = {};
+             53, pending->sport, buf->base + 2, nread - 2);
+    uv_write_t request = {};
 
     assert(to_captive);
     assert(resp.base);
@@ -150,7 +150,7 @@ void on_read_tcp_response(uv_stream_t *tcp, ssize_t nread, uv_buf_t *buf) {
 void on_connect(uv_connect_t* connection, int status) {
     uv_stream_t* stream = connection->handle;
 
-    uv_write_t request;
+    uv_write_t request = {};
 
     struct pending_dns_query *pending = (struct pending_dns_query*)stream->data;
     printf("connected, writing %p, %lu\n", pending, pending->buf.len);
@@ -189,7 +189,13 @@ void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
 
     struct timeval now;
     gettimeofday(&now, NULL);
-    struct pcap_pkthdr header = {.caplen = nread, .len = nread, .ts= now};
+    uint32_t include_capture;
+    if (nread < UINT32_MAX) {
+        include_capture = (uint32_t) nread;
+    } else {
+        include_capture = UINT32_MAX;
+    }
+    struct pcap_pkthdr header = {.caplen = include_capture, .len = include_capture, .ts= now};
     printf("outside-worker: pcap_dump(%p, %p, %p);\n", dumpable->dumper, &header, buf->base);
     pcap_dump(dumpable->dumper, &header, buf->base);
 
@@ -199,7 +205,7 @@ void uread_copy_to_data(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
 
     printf("outside-worker: dumped\n");
 
-    uv_write_t req;
+    uv_write_t req = {};
     uv_write(&req, dumpable->pipe, buf, 1, NULL);
     printf("outside-worker: written\n");
 }
