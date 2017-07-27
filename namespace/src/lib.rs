@@ -8,6 +8,10 @@ extern crate nix;
 mod bind;
 mod errors;
 
+use std::fs;
+use std::io;
+use std::io::Write;
+
 use errors::*;
 
 pub fn prepare() -> Result<()> {
@@ -23,9 +27,24 @@ pub fn prepare() -> Result<()> {
 }
 
 pub fn inside() -> Result<()> {
-    // get existing effective uid/gid
-    // unshare
-    // deal with setgroups, uidmap, gidmap
+    let real_euid = nix::unistd::geteuid();
+    let real_egid = nix::unistd::getegid();
+
+    {
+        use nix::sched::*;
+        unshare(CLONE_NEWNET | CLONE_NEWUSER)
+            .chain_err(|| "unsharing")?;
+    }
+
+    if true {
+        drop_setgroups()?;
+
+        fs::OpenOptions::new().write(true).open("/proc/self/uid_map")?
+            .write_all(format!("0 {} 1", real_euid).as_bytes())?;
+
+        fs::OpenOptions::new().write(true).open("/proc/self/gid_map")?
+            .write_all(format!("0 {} 1", real_egid).as_bytes())?;
+    }
 
     let tun_device = bind::tun_alloc()?;
 
@@ -39,6 +58,20 @@ pub fn inside() -> Result<()> {
     // exec victim
 
     Ok(())
+}
+
+fn drop_setgroups() -> Result<()> {
+    match fs::OpenOptions::new().write(true).open("/proc/self/setgroups") {
+        Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
+            // Maybe the system doesn't care?
+            Ok(())
+        },
+        Ok(mut file) => {
+            file.write_all(b"deny")?;
+            Ok(())
+        },
+        Err(e) => Err(Error::with_chain(e, "unknown error opening setgroups"))
+    }
 }
 
 
