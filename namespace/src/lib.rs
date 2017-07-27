@@ -32,10 +32,9 @@ pub fn inside() -> Result<()> {
     setup_addresses(
         tun_device.name.as_str(),
         "192.168.33.2",
+        "192.168.33.1",
         24,
     )?;
-
-    // "192.168.33.1"
 
     // exec victim
 
@@ -46,6 +45,7 @@ pub fn inside() -> Result<()> {
 fn setup_addresses(
     device: &str,
     local_addr: &str,
+    gateway_addr: &str,
     prefix_len: u8,
 ) -> Result<()> {
 
@@ -71,6 +71,14 @@ fn setup_addresses(
 
     nl.add_address(&addr)
         .chain_err(|| "adding address")?;
+
+    {
+        let gateway_addr = netlink::Address::from_string_inet(gateway_addr)
+            .chain_err(|| "translating gateway address")?;
+
+        nl.add_route(if_index, &gateway_addr)
+            .chain_err(|| "adding route")?;
+    }
 
     Ok(())
 }

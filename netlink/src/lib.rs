@@ -48,6 +48,14 @@ impl Netlink {
             Err(io::ErrorKind::InvalidData.into())
         }
     }
+
+    pub fn add_route(&mut self, if_index: i32, gateway: &Address) -> io::Result<()> {
+        if 0 == unsafe { raw::add_route(self.sock, if_index, gateway.ptr) } {
+            Ok(())
+        } else {
+            Err(io::ErrorKind::InvalidData.into())
+        }
+    }
 }
 
 impl Drop for Netlink {

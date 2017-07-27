@@ -14,6 +14,7 @@ extern "C" {
 
     pub fn link_name_index(cache: NlCache, name: *const c_char) -> i32;
     pub fn parse_inet_address(text: *const c_char) -> NlAddr;
+    pub fn add_route(sk: NlSock, if_index: c_int, gateway: NlAddr) -> i32;
 
     pub fn rtnl_addr_alloc() -> NlAddr;
     pub fn rtnl_addr_add(sk: NlSock, addr: NlAddr, flags: c_int) -> c_int;
