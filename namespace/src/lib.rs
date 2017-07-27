@@ -1,3 +1,4 @@
+extern crate exec;
 #[macro_use]
 extern crate error_chain;
 extern crate libc;
@@ -55,9 +56,9 @@ pub fn inside() -> Result<()> {
         24,
     )?;
 
-    // exec victim
+    // launch copy-out
 
-    Ok(())
+    Err(Error::with_chain(exec::Command::new("/bin/bash").exec(), "executing"))
 }
 
 fn drop_setgroups() -> Result<()> {
