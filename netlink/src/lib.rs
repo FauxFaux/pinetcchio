@@ -22,10 +22,7 @@ impl Netlink {
         let result = unsafe { raw::make_nl(&mut sock, &mut cache) };
 
         if 0 == result {
-            Ok(Netlink {
-                sock,
-                cache,
-            })
+            Ok(Netlink { sock, cache })
         } else if result < 0 {
             Err(io::ErrorKind::Other.into())
         } else {
@@ -37,7 +34,7 @@ impl Netlink {
         let name = CString::new(name).unwrap();
         match unsafe { raw::link_name_index(self.cache, name.as_ptr()) } {
             0 => Err(io::ErrorKind::NotFound.into()),
-            index => Ok(index)
+            index => Ok(index),
         }
     }
 
@@ -60,37 +57,27 @@ impl Netlink {
 
 impl Drop for Netlink {
     fn drop(&mut self) {
-        unsafe {
-            raw::free_nl(self.sock, self.cache)
-        }
+        unsafe { raw::free_nl(self.sock, self.cache) }
     }
 }
 
 impl Address {
     pub fn new() -> io::Result<Self> {
-        let ptr = unsafe {
-            raw::rtnl_addr_alloc()
-        };
+        let ptr = unsafe { raw::rtnl_addr_alloc() };
         if ptr.is_null() {
             Err(io::ErrorKind::Other.into())
         } else {
-            Ok(Self {
-                ptr
-            })
+            Ok(Self { ptr })
         }
     }
 
     pub fn from_string_inet(text: &str) -> io::Result<Self> {
         let text = CString::new(text).unwrap();
-        let ptr = unsafe {
-            raw::parse_inet_address(text.as_ptr())
-        };
+        let ptr = unsafe { raw::parse_inet_address(text.as_ptr()) };
         if ptr.is_null() {
             Err(io::ErrorKind::InvalidData.into())
         } else {
-            Ok(Self {
-                ptr
-            })
+            Ok(Self { ptr })
         }
     }
 
@@ -101,9 +88,7 @@ impl Address {
     }
 
     pub fn set_local(&mut self, local: &Self) -> io::Result<()> {
-        if 0 != unsafe {
-            raw::rtnl_addr_set_local(self.ptr, local.ptr)
-        } {
+        if 0 != unsafe { raw::rtnl_addr_set_local(self.ptr, local.ptr) } {
             Ok(())
         } else {
             Err(io::ErrorKind::Other.into())
@@ -119,8 +104,6 @@ impl Address {
 
 impl Drop for Address {
     fn drop(&mut self) {
-        unsafe {
-            raw::rtnl_addr_put(self.ptr)
-        }
+        unsafe { raw::rtnl_addr_put(self.ptr) }
     }
 }

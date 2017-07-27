@@ -24,4 +24,3 @@ extern "C" {
     pub fn rtnl_addr_set_local(addr: NlAddr, local: NlAddr) -> c_int;
     pub fn rtnl_addr_set_prefixlen(addr: NlAddr, prefix_len: c_int); // void
 }
-

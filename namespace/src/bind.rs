@@ -26,8 +26,9 @@ pub fn tun_alloc() -> Result<Tun> {
     let mut req = ioctl::IfReqFlags::default();
     req.ifr_flags = IFF_TUN | IFF_NO_PI;
 
-    unsafe { ioctl::tun_set_iff(tun.fd, &req) }
-        .chain_err(|| "tun_set_iff")?;
+    unsafe { ioctl::tun_set_iff(tun.fd, &req) }.chain_err(
+        || "tun_set_iff",
+    )?;
 
     Ok(Tun {
         name: CStr::from_bytes_with_nul(&req.ifr_name)
