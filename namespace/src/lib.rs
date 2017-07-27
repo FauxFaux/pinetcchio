@@ -11,18 +11,27 @@ mod errors;
 
 use std::fs;
 use std::io;
+use std::process;
+
 use std::io::Write;
 
 use errors::*;
 
 pub fn prepare() -> Result<()> {
     use nix::sys::socket::*;
+
     let (to_namespace, to_host) = socketpair(
         AddressFamily::Unix,
         SockType::SeqPacket,
         libc::AF_UNIX | libc::O_CLOEXEC,
         SockFlag::empty(),
     )?;
+
+    use nix::unistd::*;
+    match fork()? {
+        ForkResult::Child => { inside().expect("setup"); }
+        ForkResult::Parent { .. } => { }
+    }
 
     Ok(())
 }
@@ -58,10 +67,14 @@ pub fn inside() -> Result<()> {
 
     // launch copy-out
 
-    Err(Error::with_chain(
-        exec::Command::new("/bin/bash").exec(),
-        "executing",
-    ))
+//    Err(Error::with_chain(
+//        exec::Command::new("/bin/bash").exec(),
+//        "executing",
+//    ))
+
+    std::process::Command::new("/bin/bash").spawn()?;
+
+    Ok(())
 }
 
 fn drop_setgroups() -> Result<()> {
