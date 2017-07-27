@@ -10,7 +10,7 @@ const IFF_TUN: libc::c_short = 0x0001;
 const IFF_NO_PI: libc::c_short = 0x1000;
 
 pub struct Tun {
-    name: String,
+    pub name: String,
     fd: OwnedFd,
 }
 

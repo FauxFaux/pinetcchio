@@ -59,3 +59,7 @@ void free_nl(
         nl_cache_free(cache);
     }
 }
+
+int32_t link_name_index(struct nl_cache *cache, const char *name) {
+    return rtnl_link_name2i(cache, name);
+}

@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate error_chain;
 extern crate libc;
+extern crate netlink;
 #[macro_use]
 extern crate nix;
 
@@ -22,15 +23,57 @@ pub fn prepare() -> Result<()> {
 }
 
 pub fn inside() -> Result<()> {
-    // setup namespace
+    // get existing effective uid/gid
+    // unshare
+    // deal with setgroups, uidmap, gidmap
+
     let tun_device = bind::tun_alloc()?;
-    // setup addresses / routing via. netlink
+
+    setup_addresses(
+        tun_device.name.as_str(),
+        "192.168.33.2",
+        24,
+    )?;
+
+    // "192.168.33.1"
 
     // exec victim
 
     Ok(())
 }
 
+
+fn setup_addresses(
+    device: &str,
+    local_addr: &str,
+    prefix_len: u8,
+) -> Result<()> {
+
+    let mut nl = netlink::Netlink::new()
+        .chain_err(|| "creating netlink")?;
+
+    let if_index = nl.index_of_link_name(device)
+        .chain_err(|| "looking up interface index")?;
+
+    let mut addr = netlink::Address::new()?;
+
+    addr.set_index(if_index);
+
+    {
+        let local_addr = netlink::Address::from_string_inet(local_addr)
+            .chain_err(|| "translating local address")?;
+
+        addr.set_local(&local_addr)
+            .chain_err(|| "setting local address")?;
+    }
+
+    addr.set_prefix_len(prefix_len);
+
+    nl.add_address(&addr)
+        .chain_err(|| "adding address")?;
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
