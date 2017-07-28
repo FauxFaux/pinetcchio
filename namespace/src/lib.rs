@@ -37,6 +37,10 @@ pub fn prepare() -> Result<()> {
         })
         .spawn()?;
 
+    unsafe {
+        libc::close(0);
+    }
+
     let mut space = CmsgSpace::<[RawFd; 1]>::new();
     let msgs = recvmsg(to_namespace, &[], Some(&mut space), MsgFlags::empty())?;
     let mut iter = msgs.cmsgs();

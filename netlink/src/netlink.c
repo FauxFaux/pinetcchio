@@ -87,7 +87,6 @@ int32_t add_route(
     rtnl_route_add_nexthop(route, next_hop);
 
     ret = rtnl_route_add(sk, route, 0);
-    printf("route_add: %d %d %x\n", ret, ifindex, gateway_addr);
     nl_perror(ret, "route_add");
 
 done:
