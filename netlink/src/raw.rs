@@ -7,7 +7,8 @@ pub type NlCache = *mut c_void;
 pub type NlAddr = *mut c_void;
 
 #[link(name = "netlink", kind = "static")]
-#[link(name = "nl")]
+#[link(name = "nl-3")]
+#[link(name = "nl-route-3")]
 extern "C" {
     pub fn make_nl(sock: *mut NlSock, cache: *mut NlCache) -> i32;
     pub fn free_nl(sock: NlSock, cache: NlCache);

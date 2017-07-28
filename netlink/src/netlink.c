@@ -70,7 +70,7 @@ int32_t add_route(
         struct nl_addr *gateway_addr
         ) {
 
-    int ret = -1;
+    int ret = -7;
 
     struct rtnl_route *route = rtnl_route_alloc();
     struct rtnl_nexthop *next_hop = rtnl_route_nh_alloc();
@@ -87,6 +87,8 @@ int32_t add_route(
     rtnl_route_add_nexthop(route, next_hop);
 
     ret = rtnl_route_add(sk, route, 0);
+    printf("route_add: %d %d %x\n", ret, ifindex, gateway_addr);
+    nl_perror(ret, "route_add");
 
 done:
     if (default_addr) {
@@ -100,4 +102,13 @@ done:
     }
 
     return ret;
+}
+
+/** @return NULL on error, but possibly also for fun? */
+struct nl_addr *parse_inet_address(const char *text) {
+    struct nl_addr *addr = NULL;
+    if (nl_addr_parse(text, AF_INET, &addr)) {
+        return NULL;
+    }
+    return addr;
 }

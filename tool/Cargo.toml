@@ -1,11 +1,9 @@
 [package]
-name = "netlink"
+name = "tool"
 version = "0.1.0"
 authors = ["Chris West (Faux) <git@goeswhere.com>"]
-build = "build.rs"
 
 [dependencies]
-libc = "0.2.28"
+namespace = { path = "../namespace" }
 
-[build-dependencies]
-gcc = "0.3.51"
+error-chain = "0.10.0"

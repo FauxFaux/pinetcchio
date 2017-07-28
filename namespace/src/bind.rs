@@ -2,7 +2,7 @@ use nix;
 use libc;
 
 use std::os::unix::io::RawFd;
-use std::ffi::CStr;
+use std::str;
 
 use errors::*;
 
@@ -11,7 +11,7 @@ const IFF_NO_PI: libc::c_short = 0x1000;
 
 pub struct Tun {
     pub name: String,
-    fd: OwnedFd,
+    pub fd: OwnedFd,
 }
 
 pub fn tun_alloc() -> Result<Tun> {
@@ -31,16 +31,15 @@ pub fn tun_alloc() -> Result<Tun> {
     )?;
 
     Ok(Tun {
-        name: CStr::from_bytes_with_nul(&req.ifr_name)
-            .expect("valid struct back from tun_set_iff")
-            .to_str()?
+        name: str::from_utf8(&req.ifr_name)?
+            .trim_right_matches('\0')
             .to_string(),
         fd: tun,
     })
 }
 
-struct OwnedFd {
-    fd: RawFd,
+pub struct OwnedFd {
+    pub fd: RawFd,
 }
 
 impl OwnedFd {
@@ -66,14 +65,18 @@ impl Drop for OwnedFd {
 
 mod ioctl {
     use libc;
+    use super::RawFd;
+    use super::Result;
 
     const TUN_IOC_MAGIC: u8 = 'T' as u8;
     const TUN_IOC_SET_IFF: u8 = 202;
 
+    const TUNSETIFF: u64 = iow!(TUN_IOC_MAGIC, TUN_IOC_SET_IFF, 4);
+
     const IFNAMSIZ: usize = 16;
 
     #[repr(C)]
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     pub struct IfReqFlags {
         pub ifr_name: [u8; IFNAMSIZ],
         pub ifr_flags: libc::c_short,
@@ -83,5 +86,10 @@ mod ioctl {
         padding: [u8; 22],
     }
 
-    ioctl!(write_ptr tun_set_iff with TUN_IOC_MAGIC, TUN_IOC_SET_IFF; IfReqFlags);
+    // this is super-sensitive to the type of `flags`; libc::ioctl has *no types*.
+    pub unsafe fn tun_set_iff(fd: RawFd, flags: &IfReqFlags) -> Result<()> {
+        assert_eq!(0, libc::ioctl(fd, TUNSETIFF, flags));
+        Ok(())
+    }
+//    ioctl!(write_ptr tun_set_iff with TUN_IOC_MAGIC, TUN_IOC_SET_IFF; IfReqFlags);
 }

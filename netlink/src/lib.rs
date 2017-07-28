@@ -88,7 +88,7 @@ impl Address {
     }
 
     pub fn set_local(&mut self, local: &Self) -> io::Result<()> {
-        if 0 != unsafe { raw::rtnl_addr_set_local(self.ptr, local.ptr) } {
+        if 0 == unsafe { raw::rtnl_addr_set_local(self.ptr, local.ptr) } {
             Ok(())
         } else {
             Err(io::ErrorKind::Other.into())

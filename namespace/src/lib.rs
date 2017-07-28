@@ -14,29 +14,45 @@ use std::io;
 use std::process;
 
 use std::io::Write;
+use std::os::unix::process::CommandExt;
+use std::os::unix::io::RawFd;
 
-use errors::*;
+pub use errors::*;
 
 pub fn prepare() -> Result<()> {
     use nix::sys::socket::*;
 
     let (to_namespace, to_host) = socketpair(
         AddressFamily::Unix,
-        SockType::SeqPacket,
-        libc::AF_UNIX | libc::O_CLOEXEC,
+        SockType::Datagram,
+//        libc::AF_UNIX | libc::O_CLOEXEC,
+        0,
         SockFlag::empty(),
-    )?;
+    ).chain_err(|| "creating socket pair")?;
 
-    use nix::unistd::*;
-    match fork()? {
-        ForkResult::Child => { inside().expect("setup"); }
-        ForkResult::Parent { .. } => { }
-    }
+    let mut child = process::Command::new("/bin/bash")
+        .before_exec(move || {
+            inside(to_host).expect("really should work out how to pass this");
+            Ok(())
+        })
+        .spawn()?;
 
+    let mut space = CmsgSpace::<[RawFd; 1]>::new();
+    let msgs = recvmsg(to_namespace, &[], Some(&mut space), MsgFlags::empty())?;
+    let mut iter = msgs.cmsgs();
+    let fd = if let Some(ControlMessage::ScmRights(fds)) = iter.next() {
+        fds[0]
+    } else {
+        panic!("no fds");
+    };
+
+    println!("got an fd! {}", fd);
+
+    child.wait()?;
     Ok(())
 }
 
-pub fn inside() -> Result<()> {
+pub fn inside(to_host: RawFd) -> Result<()> {
     let real_euid = nix::unistd::geteuid();
     let real_egid = nix::unistd::getegid();
 
@@ -65,14 +81,10 @@ pub fn inside() -> Result<()> {
 
     setup_addresses(tun_device.name.as_str(), "192.168.33.2", "192.168.33.1", 24)?;
 
-    // launch copy-out
-
-//    Err(Error::with_chain(
-//        exec::Command::new("/bin/bash").exec(),
-//        "executing",
-//    ))
-
-    std::process::Command::new("/bin/bash").spawn()?;
+    use nix::sys::socket::*;
+    let arr = [tun_device.fd.fd];
+    let cmsg = [ControlMessage::ScmRights(&arr)];
+    nix::sys::socket::sendmsg(to_host, &[], &cmsg, MsgFlags::empty(), None)?;
 
     Ok(())
 }
@@ -130,9 +142,11 @@ fn setup_addresses(
             || "translating gateway address",
         )?;
 
-        nl.add_route(if_index, &gateway_addr).chain_err(
+        if let Err(e) = nl.add_route(if_index, &gateway_addr).chain_err(
             || "adding route",
-        )?;
+        ) {
+            println!("couldn't add route; meh: {:?}", e);
+        }
     }
 
     Ok(())
