@@ -59,7 +59,7 @@ pub struct OwnedFd {
 }
 
 impl OwnedFd {
-    fn new(fd: RawFd) -> Self {
+    pub fn new(fd: RawFd) -> Self {
         OwnedFd { fd }
     }
 

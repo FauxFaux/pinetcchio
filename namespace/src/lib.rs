@@ -11,6 +11,7 @@ mod errors;
 
 use std::fs;
 use std::io;
+use std::mem;
 use std::process;
 
 use std::io::Write;
@@ -18,6 +19,7 @@ use std::os::unix::process::CommandExt;
 use std::os::unix::io::RawFd;
 
 pub use errors::*;
+use bind::OwnedFd;
 
 pub fn prepare() -> Result<()> {
     use nix::sys::socket::*;
@@ -25,24 +27,31 @@ pub fn prepare() -> Result<()> {
     let (to_namespace, to_host) = socketpair(
         AddressFamily::Unix,
         SockType::Datagram,
-//        libc::AF_UNIX | libc::O_CLOEXEC,
-        0,
+        libc::AF_UNIX,
         SockFlag::empty(),
     ).chain_err(|| "creating socket pair")?;
 
-    let mut child = process::Command::new("/bin/bash")
-        .before_exec(move || {
-            inside(to_host).expect("really should work out how to pass this");
-            Ok(())
-        })
-        .spawn()?;
+    let to_namespace = OwnedFd::new(to_namespace);
+    let to_host = OwnedFd::new(to_host);
 
-    unsafe {
-        libc::close(0);
-    }
+    let mut child = {
+        let child_to_host = to_host.fd;
+        let child_to_namespace = to_namespace.fd;
+        process::Command::new("/bin/bash")
+            .before_exec(move || {
+                mem::drop(OwnedFd::new(child_to_namespace));
+                let to_host = OwnedFd::new(child_to_host);
+                inside(to_host).expect("really should work out how to pass this");
+                Ok(())
+            })
+            .spawn()?
+    };
+
+    close_stdin()?;
+    mem::drop(to_host);
 
     let mut space = CmsgSpace::<[RawFd; 1]>::new();
-    let msgs = recvmsg(to_namespace, &[], Some(&mut space), MsgFlags::empty())?;
+    let msgs = recvmsg(to_namespace.fd, &[], Some(&mut space), MsgFlags::empty())?;
     let mut iter = msgs.cmsgs();
     let fd = if let Some(ControlMessage::ScmRights(fds)) = iter.next() {
         fds[0]
@@ -50,13 +59,32 @@ pub fn prepare() -> Result<()> {
         panic!("no fds");
     };
 
+    mem::drop(to_namespace);
+
     println!("got an fd! {}", fd);
 
     child.wait()?;
     Ok(())
 }
 
-pub fn inside(to_host: RawFd) -> Result<()> {
+/// Super dodgy reopen here; should re-do freopen?
+fn close_stdin() -> Result<()> {
+    unsafe {
+        libc::close(0);
+    }
+
+    use nix::fcntl::*;
+    // Third argument ignored, as we're not creating the file.
+    assert_eq!(0, open(
+        "/dev/null",
+        O_RDONLY | O_CLOEXEC,
+        nix::sys::stat::S_IRUSR,
+    )?);
+
+    Ok(())
+}
+
+pub fn inside(to_host: OwnedFd) -> Result<()> {
     let real_euid = nix::unistd::geteuid();
     let real_egid = nix::unistd::getegid();
 
@@ -88,7 +116,7 @@ pub fn inside(to_host: RawFd) -> Result<()> {
     use nix::sys::socket::*;
     let arr = [tun_device.fd.fd];
     let cmsg = [ControlMessage::ScmRights(&arr)];
-    nix::sys::socket::sendmsg(to_host, &[], &cmsg, MsgFlags::empty(), None)?;
+    nix::sys::socket::sendmsg(to_host.fd, &[], &cmsg, MsgFlags::empty(), None)?;
 
     Ok(())
 }
