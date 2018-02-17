@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "namespace",
+    "netlink",
+    "tool",
+]

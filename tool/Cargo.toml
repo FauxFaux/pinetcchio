@@ -1,0 +1,9 @@
+[package]
+name = "tool"
+version = "0.1.0"
+authors = ["Chris West (Faux) <git@goeswhere.com>"]
+
+[dependencies]
+namespace = { path = "../namespace" }
+
+error-chain = "0.10.0"
