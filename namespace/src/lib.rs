@@ -27,7 +27,7 @@ pub fn prepare() -> Result<()> {
     let (to_namespace, to_host) = socketpair(
         AddressFamily::Unix,
         SockType::Datagram,
-        libc::AF_UNIX,
+        None,
         SockFlag::empty(),
     ).chain_err(|| "creating socket pair")?;
 
@@ -77,8 +77,8 @@ fn close_stdin() -> Result<()> {
     // Third argument ignored, as we're not creating the file.
     assert_eq!(0, open(
         "/dev/null",
-        O_RDONLY | O_CLOEXEC,
-        nix::sys::stat::S_IRUSR,
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::S_IRUSR,
     )?);
 
     Ok(())
@@ -90,7 +90,7 @@ pub fn inside(to_host: OwnedFd) -> Result<()> {
 
     {
         use nix::sched::*;
-        unshare(CLONE_NEWNET | CLONE_NEWUSER).chain_err(
+        unshare(CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER).chain_err(
             || "unsharing",
         )?;
     }

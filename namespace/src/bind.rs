@@ -21,8 +21,8 @@ pub fn tun_alloc() -> Result<Tun> {
     // Third argument ignored, as we're not creating the file.
     let tun = OwnedFd::new(open(
         "/dev/net/tun",
-        O_RDWR | O_CLOEXEC,
-        nix::sys::stat::S_IRUSR,
+        OFlag::O_RDWR | OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::S_IRUSR,
     ).chain_err(|| "opening /dev/net/tun")?);
 
     let mut req = ioctl::IfReqFlags::default();

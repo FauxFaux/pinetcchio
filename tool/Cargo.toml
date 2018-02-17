@@ -6,4 +6,4 @@ authors = ["Chris West (Faux) <git@goeswhere.com>"]
 [dependencies]
 namespace = { path = "../namespace" }
 
-error-chain = "0.10.0"
+error-chain = "0.11"
