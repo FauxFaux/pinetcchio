@@ -21,7 +21,7 @@ use std::os::unix::io::RawFd;
 pub use errors::*;
 use bind::OwnedFd;
 
-pub fn prepare() -> Result<()> {
+pub fn prepare() -> Result<(std::process::Child, RawFd)> {
     use nix::sys::socket::*;
 
     let (to_namespace, to_host) = socketpair(
@@ -34,7 +34,7 @@ pub fn prepare() -> Result<()> {
     let to_namespace = OwnedFd::new(to_namespace);
     let to_host = OwnedFd::new(to_host);
 
-    let mut child = {
+    let child = {
         let child_to_host = to_host.fd;
         let child_to_namespace = to_namespace.fd;
         process::Command::new("/bin/bash")
@@ -53,7 +53,9 @@ pub fn prepare() -> Result<()> {
     let mut space = CmsgSpace::<[RawFd; 1]>::new();
     let msgs = recvmsg(to_namespace.fd, &[], Some(&mut space), MsgFlags::empty())?;
     let mut iter = msgs.cmsgs();
-    let fd = if let Some(ControlMessage::ScmRights(fds)) = iter.next() {
+
+    let child_tun = if let Some(ControlMessage::ScmRights(fds)) = iter.next() {
+        assert_eq!(1, fds.len());
         fds[0]
     } else {
         panic!("no fds");
@@ -61,10 +63,7 @@ pub fn prepare() -> Result<()> {
 
     mem::drop(to_namespace);
 
-    println!("got an fd! {}", fd);
-
-    child.wait()?;
-    Ok(())
+    Ok((child, child_tun))
 }
 
 /// Super dodgy reopen here; should re-do freopen?

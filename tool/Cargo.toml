@@ -7,3 +7,5 @@ authors = ["Chris West (Faux) <git@goeswhere.com>"]
 namespace = { path = "../namespace" }
 
 error-chain = "0.11"
+nix = "0.10"
+hex = "0.3"
