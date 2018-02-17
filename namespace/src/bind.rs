@@ -9,7 +9,7 @@ use errors::*;
 const IFF_TUN: libc::c_short = 0x0001;
 const IFF_NO_PI: libc::c_short = 0x1000;
 
-const IFF_UP: libc::c_short = 1<<0;
+const IFF_UP: libc::c_short = 1 << 0;
 
 pub struct Tun {
     pub name: String,
@@ -28,9 +28,7 @@ pub fn tun_alloc() -> Result<Tun> {
     let mut req = ioctl::IfReqFlags::default();
     req.ifr_flags = IFF_TUN | IFF_NO_PI;
 
-    unsafe { ioctl::tun_set_iff(tun.fd, &req) }.chain_err(
-        || "tun_set_iff",
-    )?;
+    unsafe { ioctl::tun_set_iff(tun.fd, &req) }.chain_err(|| "tun_set_iff")?;
 
     raise_interface(&mut req)?;
 
@@ -45,11 +43,15 @@ pub fn tun_alloc() -> Result<Tun> {
 fn raise_interface(req: &mut ioctl::IfReqFlags) -> Result<()> {
     let sock = OwnedFd::new(unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) });
 
-    unsafe { ioctl::sock_get_flags(sock.fd, req)?; }
+    unsafe {
+        ioctl::sock_get_flags(sock.fd, req)?;
+    }
 
     req.ifr_flags |= IFF_UP;
 
-    unsafe { ioctl::sock_set_flags(sock.fd, req)?; }
+    unsafe {
+        ioctl::sock_set_flags(sock.fd, req)?;
+    }
 
     Ok(())
 }

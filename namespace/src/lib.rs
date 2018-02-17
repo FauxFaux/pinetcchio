@@ -1,6 +1,6 @@
-extern crate exec;
 #[macro_use]
 extern crate error_chain;
+extern crate exec;
 extern crate libc;
 extern crate netlink;
 #[macro_use]
@@ -75,11 +75,14 @@ fn close_stdin() -> Result<()> {
 
     use nix::fcntl::*;
     // Third argument ignored, as we're not creating the file.
-    assert_eq!(0, open(
-        "/dev/null",
-        OFlag::O_RDONLY | OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::S_IRUSR,
-    )?);
+    assert_eq!(
+        0,
+        open(
+            "/dev/null",
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::S_IRUSR,
+        )?
+    );
 
     Ok(())
 }
@@ -90,9 +93,7 @@ pub fn inside(to_host: OwnedFd) -> Result<()> {
 
     {
         use nix::sched::*;
-        unshare(CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER).chain_err(
-            || "unsharing",
-        )?;
+        unshare(CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER).chain_err(|| "unsharing")?;
     }
 
     if true {
@@ -122,9 +123,10 @@ pub fn inside(to_host: OwnedFd) -> Result<()> {
 }
 
 fn drop_setgroups() -> Result<()> {
-    match fs::OpenOptions::new().write(true).open(
-        "/proc/self/setgroups",
-    ) {
+    match fs::OpenOptions::new()
+        .write(true)
+        .open("/proc/self/setgroups")
+    {
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
             // Maybe the system doesn't care?
             Ok(())
@@ -137,32 +139,27 @@ fn drop_setgroups() -> Result<()> {
     }
 }
 
-
 fn setup_addresses(
     device: &str,
     local_addr: &str,
     gateway_addr: &str,
     prefix_len: u8,
 ) -> Result<()> {
-
     let mut nl = netlink::Netlink::new().chain_err(|| "creating netlink")?;
 
-    let if_index = nl.index_of_link_name(device).chain_err(
-        || "looking up interface index",
-    )?;
+    let if_index = nl.index_of_link_name(device)
+        .chain_err(|| "looking up interface index")?;
 
     let mut addr = netlink::Address::new()?;
 
     addr.set_index(if_index);
 
     {
-        let local_addr = netlink::Address::from_string_inet(local_addr).chain_err(
-            || "translating local address",
-        )?;
+        let local_addr = netlink::Address::from_string_inet(local_addr)
+            .chain_err(|| "translating local address")?;
 
-        addr.set_local(&local_addr).chain_err(
-            || "setting local address",
-        )?;
+        addr.set_local(&local_addr)
+            .chain_err(|| "setting local address")?;
     }
 
     addr.set_prefix_len(prefix_len);
@@ -170,13 +167,12 @@ fn setup_addresses(
     nl.add_address(&addr).chain_err(|| "adding address")?;
 
     {
-        let gateway_addr = netlink::Address::from_string_inet(gateway_addr).chain_err(
-            || "translating gateway address",
-        )?;
+        let gateway_addr = netlink::Address::from_string_inet(gateway_addr)
+            .chain_err(|| "translating gateway address")?;
 
-        if let Err(e) = nl.add_route(if_index, &gateway_addr).chain_err(
-            || "adding route",
-        ) {
+        if let Err(e) = nl.add_route(if_index, &gateway_addr)
+            .chain_err(|| "adding route")
+        {
             println!("couldn't add route; meh: {:?}", e);
         }
     }
