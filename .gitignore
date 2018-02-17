@@ -7,7 +7,7 @@ tcpip_test
 pocksify
 tests
 Testing/
-CMake*
+CMake*/
 cmake_install.cmake
 CTestTestfile.cmake
 Makefile
