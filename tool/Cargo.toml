@@ -6,6 +6,8 @@ authors = ["Chris West (Faux) <git@goeswhere.com>"]
 [dependencies]
 namespace = { path = "../namespace" }
 
+byteorder = "1"
+cast = "0.2"
 error-chain = "0.11"
 nix = "0.10"
 hex = "0.3"

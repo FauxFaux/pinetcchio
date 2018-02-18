@@ -1,3 +1,5 @@
+extern crate byteorder;
+extern crate cast;
 #[macro_use]
 extern crate error_chain;
 extern crate hex;
