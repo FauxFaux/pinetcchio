@@ -8,6 +8,7 @@ use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::*;
 use nix::sys::epoll;
+use fdns_parse::parse as fdns;
 
 use errors::*;
 
@@ -15,7 +16,7 @@ const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
 const IP_PROTOCOL_UDP: u8 = 17;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 enum Protocol {
     Tcp,
     Udp,
@@ -98,11 +99,11 @@ fn handle_v4(buf: &[u8]) -> Result<String> {
     let buf = &buf[ip_header_length as usize..];
 
     Ok(format!(
-        "ipv4 {:?} -> {:?} {:?} remainder: {}",
+        "ipv4 {:?} -> {:?} {:?} {:?}",
         src,
         dest,
         protocol,
-        ::hex::encode(buf)
+        handle_protocol(protocol, buf),
     ))
 }
 
@@ -133,11 +134,51 @@ fn handle_v6(buf: &[u8]) -> Result<String> {
     let buf = &buf[V6_HEADER_LEN..];
 
     Ok(format!(
-        "ipv6 {:?} -> {:?} {:?} remainder: {}",
+        "ipv6 {:?} -> {:?} {:?} remainder: {:?}",
         src,
         dest,
         protocol,
+        handle_protocol(protocol, buf),
+    ))
+}
+
+fn handle_protocol(protocol: Protocol, buf: &[u8]) -> Result<String> {
+    match protocol {
+        Protocol::Udp => handle_udp(buf),
+        Protocol::Tcp => handle_tcp(buf),
+    }
+}
+
+fn handle_udp(buf: &[u8]) -> Result<String> {
+    let src_port = read_u16(buf);
+    let dst_port = read_u16(&buf[2..]);
+
+    // TODO: length, checksum
+
+    let buf = &buf[8..];
+
+
+    if 53 == dst_port {
+        return Ok(format!("src: {}, dns: {:?}", src_port, fdns::parse(buf)));
+    }
+
+    Ok(format!(
+        "{} -> {}, remaining: {}",
+        src_port,
+        dst_port,
         ::hex::encode(buf)
+    ))
+}
+
+fn handle_tcp(buf: &[u8]) -> Result<String> {
+    let src_port = read_u16(buf);
+    let dst_port = read_u16(&buf[2..]);
+
+    Ok(format!(
+        "{} -> {}, remaining: {}",
+        src_port,
+        dst_port,
+        ::hex::encode(&buf[20..])
     ))
 }
 

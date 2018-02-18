@@ -1,6 +1,8 @@
 tun: ip
 tap: eth
 
+### Net
+
 Packets come in on tun.
  * New connection:
    * establishing connection comms
@@ -42,3 +44,16 @@ reading the log:
     * send packet
     * replicate errors
 
+
+### Dns
+
+Allocate every name a different IP address,
+resolve later. Hell, try and resolve now.
+Does anything care? Probably a couple of things,
+e.g. history of packing time into v4 dns addresses.
+6to4 stuff probably breaks that anyway.
+
+Only 16M addresses in 10.* to return. Return 60s
+TTL, hope nobody does 16M lookups in a minute?
+GC on 1/4th exhaustion, so we have a while to detect
+people using the wrong IP?

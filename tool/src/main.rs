@@ -2,6 +2,7 @@ extern crate byteorder;
 extern crate cast;
 #[macro_use]
 extern crate error_chain;
+extern crate fdns_parse;
 extern crate hex;
 extern crate namespace;
 extern crate nix;
