@@ -68,9 +68,7 @@ pub fn prepare() -> Result<(std::process::Child, RawFd)> {
 
 /// Super dodgy reopen here; should re-do freopen?
 fn close_stdin() -> Result<()> {
-    unsafe {
-        libc::close(0);
-    }
+    nix::unistd::close(0)?;
 
     use nix::fcntl::*;
     // Third argument ignored, as we're not creating the file.

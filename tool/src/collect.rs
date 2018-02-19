@@ -1,7 +1,5 @@
-use std::fmt;
 use std::fs;
 use std::io::Read;
-use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::os::unix::io::FromRawFd;
@@ -59,8 +57,6 @@ pub fn watch(tun: RawFd) -> Result<()> {
             }
         }
     }
-
-    Ok(())
 }
 
 fn header_length(buf: &[u8]) -> u16 {
@@ -83,7 +79,14 @@ fn handle_v4(buf: &[u8]) -> Result<String> {
     // buf[1]: DSCP / ECN: unsupported
 
     let ip_total_length = read_u16(&buf[2..]);
-    let identification = read_u16(&buf[4..]);
+    ensure!(
+        usize(ip_total_length) == buf.len(),
+        "ip total length violation, actual: {}, stated: {}",
+        buf.len(),
+        ip_total_length
+    );
+
+    // buf[4..5]: identification (ignored)
 
     ensure!(
         IP_FLAG_DONT_FRAGMENT == buf[6] & IP_FLAG_DONT_FRAGMENT,
