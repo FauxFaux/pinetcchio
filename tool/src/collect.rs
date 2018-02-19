@@ -1,14 +1,17 @@
 use std::fmt;
+use std::fs;
+use std::io::Read;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::os::unix::io::FromRawFd;
 use std::os::unix::io::RawFd;
 
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::*;
-use nix::sys::epoll;
 use fdns_parse::parse as fdns;
+use mio;
 
 use errors::*;
 
@@ -25,31 +28,35 @@ enum Protocol {
 pub fn watch(tun: RawFd) -> Result<()> {
     assert!(tun > 0);
 
-    let epfd = epoll::epoll_create()?;
+    let poll = mio::Poll::new()?;
 
-    epoll::epoll_ctl(
-        epfd,
-        epoll::EpollOp::EpollCtlAdd,
-        tun,
-        Some(&mut epoll::EpollEvent::new(
-            epoll::EpollFlags::EPOLLIN,
-            tun as u64,
-        )),
+    const TUN_TOKEN: mio::Token = mio::Token(0);
+    let tun_struct = mio::unix::EventedFd(&tun);
+    poll.register(
+        &tun_struct,
+        TUN_TOKEN,
+        mio::Ready::readable(),
+        mio::PollOpt::level(),
     )?;
 
+    let mut tun_file = unsafe { fs::File::from_raw_fd(tun) };
+
+    let mut events = mio::Events::with_capacity(1024);
+
     loop {
-        let mut events = [epoll::EpollEvent::empty(); 10];
-        let valid = epoll::epoll_wait(epfd, &mut events, 1000)?;
-        let valid = &events[..valid];
+        poll.poll(&mut events, None)?;
 
-        for ev in valid {
-            assert_eq!(epoll::EpollFlags::EPOLLIN, ev.events());
-            let mut buf = [0u8; 4 * 1024];
-            let fd = ev.data() as RawFd;
-            let read = ::nix::unistd::read(fd, &mut buf)?;
-            let buf = &buf[..read];
-
-            println!("{:?}", handle(buf));
+        for ev in events.iter() {
+            match ev.token() {
+                TUN_TOKEN => {
+                    assert_eq!(mio::Ready::readable(), ev.readiness());
+                    let mut buf = [0u8; 4 * 1024];
+                    let read = tun_file.read(&mut buf)?;
+                    let buf = &buf[..read];
+                    println!("{:?}", handle(buf));
+                }
+                _ => unimplemented!("unexpected token"),
+            }
         }
     }
 
@@ -156,7 +163,6 @@ fn handle_udp(buf: &[u8]) -> Result<String> {
     // TODO: length, checksum
 
     let buf = &buf[8..];
-
 
     if 53 == dst_port {
         return Ok(format!("src: {}, dns: {:?}", src_port, fdns::parse(buf)));

@@ -4,8 +4,8 @@ extern crate cast;
 extern crate error_chain;
 extern crate fdns_parse;
 extern crate hex;
+extern crate mio;
 extern crate namespace;
-extern crate nix;
 
 mod collect;
 mod errors;
