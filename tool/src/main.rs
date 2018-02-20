@@ -1,3 +1,6 @@
+// totally trivial methods; could inline if necessary
+#![feature(duration_extras)]
+
 extern crate byteorder;
 extern crate cast;
 #[macro_use]
@@ -7,6 +10,7 @@ extern crate hex;
 extern crate itertools;
 extern crate mio;
 extern crate namespace;
+extern crate pcap_file;
 
 mod collect;
 mod dns;

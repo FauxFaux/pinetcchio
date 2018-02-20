@@ -13,3 +13,5 @@ error-chain = "0.11"
 hex = "0.3"
 itertools = "0.7"
 mio = "0.6"
+# until https://github.com/courvoif/pcap-file/pull/4 is merged
+pcap-file = { git = "https://github.com/FauxFaux/pcap-file", branch = "error-11" }

@@ -5,12 +5,15 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::io::RawFd;
+use std::time::SystemTime;
 
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::*;
 use fdns_parse::parse as fdns;
 use mio;
+use pcap_file;
+use pcap_file::PcapWriter;
 
 use dns;
 use errors::*;
@@ -47,6 +50,11 @@ pub fn watch(tun: RawFd) -> Result<()> {
     let mut events = mio::Events::with_capacity(1024);
     let mut internal_resolver = dns::InternalResolver::default();
     let mut write = Vec::new();
+    let mut pcap = PcapWriter::with_header(
+        pcap_file::PcapHeader::with_datalink(pcap_file::DataLink::RAW),
+        fs::File::create("all.pcap")?,
+    )?;
+    let start = SystemTime::now();
 
     loop {
         poll.poll(&mut events, None)?;
@@ -57,6 +65,7 @@ pub fn watch(tun: RawFd) -> Result<()> {
                     let mut buf = [0u8; 4 * 1024];
                     let read = tun_file.read(&mut buf)?;
                     let buf = &buf[..read];
+                    write_pcap(&mut pcap, start, buf)?;
                     println!("{:?}", handle(buf));
                     write.push(icmp(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf));
                     poll.reregister(
@@ -70,9 +79,9 @@ pub fn watch(tun: RawFd) -> Result<()> {
                 if ev.readiness().contains(mio::Ready::writable()) {
                     match write.pop() {
                         Some(ref val) => {
-                            println!("writing response..");
+                            write_pcap(&mut pcap, start, val)?;
                             tun_file.write_all(val)?;
-                        },
+                        }
                         None => poll.reregister(
                             &tun_struct,
                             TUN_TOKEN,
@@ -88,10 +97,16 @@ pub fn watch(tun: RawFd) -> Result<()> {
     }
 }
 
+fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8]) -> Result<()> {
+    let duration = SystemTime::now().duration_since(start)?;
+    pcap.write(u32(duration.as_secs())?, duration.subsec_micros(), buf)?;
+    Ok(())
+}
+
 fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     const ICMP_LEN: usize = 576;
     const IP_LEN: usize = 20;
-    let total_len = IP_LEN + ICMP_LEN.min(data.len() + 4);
+    let total_len = IP_LEN + ICMP_LEN.min(data.len() + 8);
     let mut vec = Vec::with_capacity(total_len);
     vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
     vec.extend(&[0, 0]); // space for length
@@ -106,9 +121,9 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
 
     vec.push(ty);
     vec.push(code);
-    vec.push(0);
-    vec.push(0);
-    vec.extend(&data[..(ICMP_LEN - 4).min(data.len())]);
+    vec.extend(&[0, 0]); // checksum space
+    vec.extend(&[0, 0, 0, 0]); // unused extra header space
+    vec.extend(&data[..(ICMP_LEN - 8).min(data.len())]);
 
     let checksum = internet_checksum(&vec[IP_LEN..]);
     BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
