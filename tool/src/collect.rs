@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Read;
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::os::unix::io::FromRawFd;
@@ -11,11 +12,15 @@ use cast::*;
 use fdns_parse::parse as fdns;
 use mio;
 
+use dns;
 use errors::*;
 
 const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
 const IP_PROTOCOL_UDP: u8 = 17;
+
+const ICMP_DEST_UNREACHABLE: u8 = 3;
+const ICMP_DEST_UNREACHABLE_HOST: u8 = 1;
 
 #[derive(Copy, Clone, Debug)]
 enum Protocol {
@@ -40,23 +45,73 @@ pub fn watch(tun: RawFd) -> Result<()> {
     let mut tun_file = unsafe { fs::File::from_raw_fd(tun) };
 
     let mut events = mio::Events::with_capacity(1024);
+    let mut internal_resolver = dns::InternalResolver::default();
+    let mut write = Vec::new();
 
     loop {
         poll.poll(&mut events, None)?;
 
         for ev in events.iter() {
-            match ev.token() {
-                TUN_TOKEN => {
-                    assert_eq!(mio::Ready::readable(), ev.readiness());
+            if ev.token() == TUN_TOKEN {
+                if ev.readiness().contains(mio::Ready::readable()) {
                     let mut buf = [0u8; 4 * 1024];
                     let read = tun_file.read(&mut buf)?;
                     let buf = &buf[..read];
                     println!("{:?}", handle(buf));
+                    write.push(icmp(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf));
+                    poll.reregister(
+                        &tun_struct,
+                        TUN_TOKEN,
+                        mio::Ready::readable() | mio::Ready::writable(),
+                        mio::PollOpt::level(),
+                    )?;
                 }
-                _ => unimplemented!("unexpected token"),
+
+                if ev.readiness().contains(mio::Ready::writable()) {
+                    match write.pop() {
+                        Some(ref val) => tun_file.write_all(val)?,
+                        None => poll.reregister(
+                            &tun_struct,
+                            TUN_TOKEN,
+                            mio::Ready::readable(),
+                            mio::PollOpt::level(),
+                        )?,
+                    }
+                }
+            } else {
+                unimplemented!("unexpected token")
             }
         }
     }
+}
+
+fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
+    const ICMP_LEN: usize = 576;
+    let mut vec = Vec::with_capacity(ICMP_LEN.min(data.len() + 4));
+    vec.push(ty);
+    vec.push(code);
+    vec.push(0);
+    vec.push(0);
+    vec.extend(&data[..(ICMP_LEN - 4).min(data.len())]);
+
+    let checksum = internet_checksum(&vec);
+    BigEndian::write_u16(&mut vec[2..], checksum);
+    vec
+}
+
+fn internet_checksum(data: &[u8]) -> u16 {
+    use itertools::Itertools;
+    let mut sum: u16 = 0;
+    for (&a, &b) in data.iter().tuples() {
+        sum = sum.wrapping_add(u16(a) * 0x100);
+        sum = sum.wrapping_add(u16(b));
+    }
+
+    if data.len() % 2 == 1 {
+        sum = sum.wrapping_add(0x100 * u16(data[data.len() - 1]));
+    }
+
+    sum
 }
 
 fn header_length(buf: &[u8]) -> u16 {
