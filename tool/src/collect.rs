@@ -69,7 +69,10 @@ pub fn watch(tun: RawFd) -> Result<()> {
 
                 if ev.readiness().contains(mio::Ready::writable()) {
                     match write.pop() {
-                        Some(ref val) => tun_file.write_all(val)?,
+                        Some(ref val) => {
+                            println!("writing response..");
+                            tun_file.write_all(val)?;
+                        },
                         None => poll.reregister(
                             &tun_struct,
                             TUN_TOKEN,
@@ -87,15 +90,30 @@ pub fn watch(tun: RawFd) -> Result<()> {
 
 fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     const ICMP_LEN: usize = 576;
-    let mut vec = Vec::with_capacity(ICMP_LEN.min(data.len() + 4));
+    const IP_LEN: usize = 20;
+    let total_len = IP_LEN + ICMP_LEN.min(data.len() + 4);
+    let mut vec = Vec::with_capacity(total_len);
+    vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
+    vec.extend(&[0, 0]); // space for length
+    BigEndian::write_u16(&mut vec[2..], u16(total_len).unwrap());
+
+    // identification x2, flags, fragment, ttl, proto, checksum x2
+    vec.extend(&[0, 0, 0, 0, 0x40, 1, 0, 0]);
+    vec.extend(&[192, 168, 33, 1]);
+    vec.extend(&[192, 168, 33, 2]);
+
+    assert_eq!(IP_LEN, vec.len());
+
     vec.push(ty);
     vec.push(code);
     vec.push(0);
     vec.push(0);
     vec.extend(&data[..(ICMP_LEN - 4).min(data.len())]);
 
-    let checksum = internet_checksum(&vec);
-    BigEndian::write_u16(&mut vec[2..], checksum);
+    let checksum = internet_checksum(&vec[IP_LEN..]);
+    BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
+
+    assert_eq!(total_len, vec.len());
     vec
 }
 
