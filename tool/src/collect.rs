@@ -121,7 +121,7 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     // ip, icmp, old ip (TODO: assumed to be short v4), first 64-bits of datagram
     const SIXTY_FOUR_BITS: usize = 8;
     let total_len = IP_LEN + 8 + IP_LEN + SIXTY_FOUR_BITS;
-    let mut vec = Vec::with_capacity(total_len - SIXTY_FOUR_BITS);
+    let mut vec = Vec::with_capacity(total_len);
     vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
     vec.extend(&[0, 0]); // space for length
     BigEndian::write_u16(&mut vec[2..], u16(total_len).unwrap());
@@ -131,19 +131,22 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     vec.extend(&[192, 168, 33, 1]);
     vec.extend(&[192, 168, 33, 2]);
 
+    // BORROW CHECKER
+    let checksum = internet_checksum(&vec);
+    BigEndian::write_u16(&mut vec[10..], checksum);
+
     assert_eq!(IP_LEN, vec.len());
 
     vec.push(ty);
     vec.push(code);
     vec.extend(&[0, 0]); // checksum space
     vec.extend(&[0, 0, 0, 0]); // unused extra header space
-//    vec.extend(&data[..IP_LEN + SIXTY_FOUR_BITS]);
-    vec.extend(&data[..IP_LEN]);
+    vec.extend(&data[..IP_LEN + SIXTY_FOUR_BITS]);
 
     let checksum = internet_checksum(&vec[IP_LEN..]);
     BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
 
-//    assert_eq!(total_len, vec.len());
+    assert_eq!(total_len, vec.len());
     vec
 }
 
@@ -154,17 +157,22 @@ fn icmpv6(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
 
 fn internet_checksum(data: &[u8]) -> u16 {
     use itertools::Itertools;
-    let mut sum: u16 = 0;
+    let mut sum: u64 = 0;
     for (&a, &b) in data.iter().tuples() {
-        sum = sum.wrapping_add(u16(a) * 0x100);
-        sum = sum.wrapping_add(u16(b));
+        sum += u64(a) * 0x100;
+        sum += u64(b);
     }
 
     if data.len() % 2 == 1 {
-        sum = sum.wrapping_add(0x100 * u16(data[data.len() - 1]));
+        sum += u64(data[data.len() - 1]) * 0x100;
     }
 
-    sum ^ 0xffff
+    // keep only the last 16 bits of the 32 bit calculated sum and add the carries
+    while 0 != (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    u16(sum).unwrap() ^ 0xffff
 }
 
 fn header_length(buf: &[u8]) -> u16 {
