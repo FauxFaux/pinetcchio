@@ -25,6 +25,12 @@ const IP_PROTOCOL_UDP: u8 = 17;
 const ICMP_DEST_UNREACHABLE: u8 = 3;
 const ICMP_DEST_UNREACHABLE_HOST: u8 = 1;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum IpVersion {
+    Four,
+    Six,
+}
+
 #[derive(Copy, Clone, Debug)]
 enum Protocol {
     Tcp,
@@ -67,7 +73,14 @@ pub fn watch(tun: RawFd) -> Result<()> {
                     let buf = &buf[..read];
                     write_pcap(&mut pcap, start, buf)?;
                     println!("{:?}", handle(buf));
-                    write.push(icmp(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf));
+                    write.push(match ip_version(buf[0])? {
+                        IpVersion::Four => {
+                            icmp(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf)
+                        }
+                        IpVersion::Six => {
+                            icmpv6(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf)
+                        }
+                    });
                     poll.reregister(
                         &tun_struct,
                         TUN_TOKEN,
@@ -104,10 +117,11 @@ fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8])
 }
 
 fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
-    const ICMP_LEN: usize = 576;
     const IP_LEN: usize = 20;
-    let total_len = IP_LEN + ICMP_LEN.min(data.len() + 8);
-    let mut vec = Vec::with_capacity(total_len);
+    // ip, icmp, old ip (TODO: assumed to be short v4), first 64-bits of datagram
+    const SIXTY_FOUR_BITS: usize = 8;
+    let total_len = IP_LEN + 8 + IP_LEN + SIXTY_FOUR_BITS;
+    let mut vec = Vec::with_capacity(total_len - SIXTY_FOUR_BITS);
     vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
     vec.extend(&[0, 0]); // space for length
     BigEndian::write_u16(&mut vec[2..], u16(total_len).unwrap());
@@ -123,13 +137,19 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     vec.push(code);
     vec.extend(&[0, 0]); // checksum space
     vec.extend(&[0, 0, 0, 0]); // unused extra header space
-    vec.extend(&data[..(ICMP_LEN - 8).min(data.len())]);
+//    vec.extend(&data[..IP_LEN + SIXTY_FOUR_BITS]);
+    vec.extend(&data[..IP_LEN]);
 
     let checksum = internet_checksum(&vec[IP_LEN..]);
     BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
 
-    assert_eq!(total_len, vec.len());
+//    assert_eq!(total_len, vec.len());
     vec
+}
+
+fn icmpv6(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
+    // TODO: totally wrong?
+    icmp(ty, code, data)
 }
 
 fn internet_checksum(data: &[u8]) -> u16 {
@@ -144,18 +164,25 @@ fn internet_checksum(data: &[u8]) -> u16 {
         sum = sum.wrapping_add(0x100 * u16(data[data.len() - 1]));
     }
 
-    sum
+    sum ^ 0xffff
 }
 
 fn header_length(buf: &[u8]) -> u16 {
     u16::from(buf[0] & 0x0f) * 32 / 8
 }
 
-fn handle(buf: &[u8]) -> Result<String> {
-    match buf[0] & 0xf0 {
-        0x40 => handle_v4(buf),
-        0x60 => handle_v6(buf),
+fn ip_version(first_byte: u8) -> Result<IpVersion> {
+    Ok(match first_byte & 0xf0 {
+        0x40 => IpVersion::Four,
+        0x60 => IpVersion::Six,
         version => bail!("unsupported ip version: {:x}", version),
+    })
+}
+
+fn handle(buf: &[u8]) -> Result<String> {
+    match ip_version(buf[0])? {
+        IpVersion::Four => handle_v4(buf),
+        IpVersion::Six => handle_v6(buf),
     }
 }
 
