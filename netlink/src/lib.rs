@@ -6,6 +6,12 @@ use std::ffi::CString;
 
 mod raw;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Family {
+    Ipv4,
+    Ipv6,
+}
+
 pub struct Netlink {
     sock: raw::NlSock,
     cache: raw::NlCache,
@@ -46,8 +52,13 @@ impl Netlink {
         }
     }
 
-    pub fn add_route(&mut self, if_index: i32, gateway: &Address) -> io::Result<()> {
-        if 0 == unsafe { raw::add_route(self.sock, if_index, gateway.ptr) } {
+    pub fn add_route(
+        &mut self,
+        family: Family,
+        if_index: i32,
+        gateway: &Address,
+    ) -> io::Result<()> {
+        if 0 == unsafe { raw::add_route(family.raw(), self.sock, if_index, gateway.ptr) } {
             Ok(())
         } else {
             Err(io::ErrorKind::InvalidData.into())
@@ -71,9 +82,26 @@ impl Address {
         }
     }
 
-    pub fn from_string_inet(text: &str) -> io::Result<Self> {
+    /// e.g. `(Family::Ipv4, "192.168.1.1")`
+    pub fn from_string_inet(family: Family, text: &str) -> io::Result<Self> {
         let text = CString::new(text).unwrap();
-        let ptr = unsafe { raw::parse_inet_address(text.as_ptr()) };
+        let ptr = unsafe { raw::parse_inet_address(family.raw(), text.as_ptr()) };
+        if ptr.is_null() {
+            Err(io::ErrorKind::InvalidData.into())
+        } else {
+            Ok(Self { ptr })
+        }
+    }
+
+    /// e.g. `(Family::Ipv4, &[192, 168, 1, 1])`
+    pub fn from_bytes_inet(family: Family, data: &[u8]) -> io::Result<Self> {
+        let ptr = unsafe {
+            raw::build_inet_address(
+                family.raw(),
+                data.as_ptr() as *const libc::c_void,
+                data.len(),
+            )
+        };
         if ptr.is_null() {
             Err(io::ErrorKind::InvalidData.into())
         } else {
@@ -97,7 +125,7 @@ impl Address {
 
     pub fn set_prefix_len(&mut self, prefix_len: u8) {
         unsafe {
-            raw::rtnl_addr_set_prefixlen(self.ptr, prefix_len as i32);
+            raw::rtnl_addr_set_prefixlen(self.ptr, i32::from(prefix_len));
         }
     }
 }
@@ -105,5 +133,14 @@ impl Address {
 impl Drop for Address {
     fn drop(&mut self) {
         unsafe { raw::rtnl_addr_put(self.ptr) }
+    }
+}
+
+impl Family {
+    fn raw(&self) -> i32 {
+        match *self {
+            Family::Ipv4 => raw::AF_INET,
+            Family::Ipv6 => raw::AF_INET6,
+        }
     }
 }

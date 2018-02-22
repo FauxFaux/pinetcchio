@@ -65,6 +65,7 @@ int32_t link_name_index(struct nl_cache *cache, const char *name) {
 }
 
 int32_t add_route(
+        int family,
         struct nl_sock *sk,
         int ifindex,
         struct nl_addr *gateway_addr
@@ -74,7 +75,7 @@ int32_t add_route(
 
     struct rtnl_route *route = rtnl_route_alloc();
     struct rtnl_nexthop *next_hop = rtnl_route_nh_alloc();
-    struct nl_addr *default_addr = nl_addr_build(AF_INET, NULL, 0);
+    struct nl_addr *default_addr = nl_addr_build(family, NULL, 0);
 
     if (!route || !next_hop || !default_addr) {
         goto done;
@@ -103,11 +104,22 @@ done:
     return ret;
 }
 
-/** @return NULL on error, but possibly also for fun? */
-struct nl_addr *parse_inet_address(const char *text) {
+/**
+ * @param hint AF_INET, AF_INET6
+ * @return NULL on error, but possibly also for fun?
+ */
+struct nl_addr *parse_inet_address(int family, const char *text) {
     struct nl_addr *addr = NULL;
-    if (nl_addr_parse(text, AF_INET, &addr)) {
+    if (nl_addr_parse(text, family, &addr)) {
         return NULL;
     }
     return addr;
+}
+
+/**
+ * @param hint AF_INET, AF_INET6
+ * @return NULL on error
+ */
+struct nl_addr *build_inet_address(int family, const char *buf, size_t len) {
+    return nl_addr_build(family, buf, len);
 }

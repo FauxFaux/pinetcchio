@@ -5,6 +5,7 @@ extern crate libc;
 extern crate netlink;
 #[macro_use]
 extern crate nix;
+extern crate rand;
 
 mod bind;
 mod errors;
@@ -15,8 +16,11 @@ use std::mem;
 use std::process;
 
 use std::io::Write;
+use std::net::Ipv6Addr;
 use std::os::unix::process::CommandExt;
 use std::os::unix::io::RawFd;
+
+use rand::Rng;
 
 pub use errors::*;
 use bind::OwnedFd;
@@ -84,6 +88,13 @@ fn close_stdin() -> Result<()> {
     Ok(())
 }
 
+fn ula_zero() -> Ipv6Addr {
+    let mut bytes = [0u8; 16];
+    bytes[0] = 0xfd;
+    bytes[1..6].copy_from_slice(&rand::thread_rng().gen::<[u8; 5]>());
+    bytes.into()
+}
+
 pub fn inside(to_host: OwnedFd) -> Result<()> {
     let real_euid = nix::unistd::geteuid();
     let real_egid = nix::unistd::getegid();
@@ -109,7 +120,26 @@ pub fn inside(to_host: OwnedFd) -> Result<()> {
 
     let tun_device = bind::tun_alloc()?;
 
-    setup_addresses(tun_device.name.as_str(), "192.168.33.2", "192.168.33.1", 24)?;
+    let v6_prefix = ula_zero().octets();
+    let mut v6_gateway = v6_prefix.clone();
+    v6_gateway[15] = 1;
+    let mut v6_local = v6_prefix.clone();
+    v6_local[15] = 2;
+
+    setup_addresses(
+        tun_device.name.as_str(),
+        netlink::Family::Ipv4,
+        &[192, 168, 33, 2],
+        &[192, 168, 33, 2],
+        24,
+    )?;
+    setup_addresses(
+        tun_device.name.as_str(),
+        netlink::Family::Ipv6,
+        &v6_local,
+        &v6_gateway,
+        48,
+    )?;
 
     use nix::sys::socket::*;
     let arr = [tun_device.fd.fd];
@@ -138,8 +168,9 @@ fn drop_setgroups() -> Result<()> {
 
 fn setup_addresses(
     device: &str,
-    local_addr: &str,
-    gateway_addr: &str,
+    family: netlink::Family,
+    local_addr: &[u8],
+    gateway_addr: &[u8],
     prefix_len: u8,
 ) -> Result<()> {
     let mut nl = netlink::Netlink::new().chain_err(|| "creating netlink")?;
@@ -152,7 +183,7 @@ fn setup_addresses(
     addr.set_index(if_index);
 
     {
-        let local_addr = netlink::Address::from_string_inet(local_addr)
+        let local_addr = netlink::Address::from_bytes_inet(family, local_addr)
             .chain_err(|| "translating local address")?;
 
         addr.set_local(&local_addr)
@@ -164,10 +195,10 @@ fn setup_addresses(
     nl.add_address(&addr).chain_err(|| "adding address")?;
 
     {
-        let gateway_addr = netlink::Address::from_string_inet(gateway_addr)
+        let gateway_addr = netlink::Address::from_bytes_inet(family, gateway_addr)
             .chain_err(|| "translating gateway address")?;
 
-        if let Err(e) = nl.add_route(if_index, &gateway_addr)
+        if let Err(e) = nl.add_route(family, if_index, &gateway_addr)
             .chain_err(|| "adding route")
         {
             println!("couldn't add route; meh: {:?}", e);
