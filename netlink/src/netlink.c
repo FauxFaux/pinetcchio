@@ -84,11 +84,19 @@ int32_t add_route(
     rtnl_route_nh_set_ifindex(next_hop, ifindex);
     rtnl_route_nh_set_gateway(next_hop, gateway_addr);
 
-    rtnl_route_set_dst(route, default_addr);
+    ret = rtnl_route_set_dst(route, default_addr);
+    if (0 != ret) {
+        nl_perror(ret, "rtnl_route_set_dst(default)");
+        goto done;
+    }
+
     rtnl_route_add_nexthop(route, next_hop);
 
     ret = rtnl_route_add(sk, route, 0);
-    nl_perror(ret, "route_add");
+    if (0 != ret) {
+        nl_perror(ret, "route_add");
+        goto done;
+    }
 
 done:
     if (default_addr) {
