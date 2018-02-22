@@ -21,6 +21,8 @@ use errors::*;
 const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
 const IP_PROTOCOL_UDP: u8 = 17;
+const IP_PROTOCOL_ICMP_V4: u8 = 1;
+const IP_PROTOCOL_ICMP_V6: u8 = 58;
 
 const ICMP_DEST_UNREACHABLE: u8 = 3;
 const ICMP_DEST_UNREACHABLE_HOST: u8 = 1;
@@ -35,6 +37,8 @@ enum IpVersion {
 enum Protocol {
     Tcp,
     Udp,
+    IcmpV4,
+    IcmpV6
 }
 
 pub fn watch(tun: RawFd) -> Result<()> {
@@ -256,7 +260,7 @@ fn handle_v6(buf: &[u8]) -> Result<String> {
     let protocol = match buf[6] {
         IP_PROTOCOL_TCP => Protocol::Tcp,
         IP_PROTOCOL_UDP => Protocol::Udp,
-        58 => bail!("unsupported ipv6 nonsense: no data"),
+        IP_PROTOCOL_ICMP_V6 => Protocol::IcmpV6,
         next_header => bail!("unsupported next header number: {}", next_header),
     };
 
@@ -280,6 +284,8 @@ fn handle_protocol(protocol: Protocol, buf: &[u8]) -> Result<String> {
     match protocol {
         Protocol::Udp => handle_udp(buf),
         Protocol::Tcp => handle_tcp(buf),
+        Protocol::IcmpV4 => handle_icmp(IpVersion::Four, buf),
+        Protocol::IcmpV6 => handle_icmp(IpVersion::Six, buf),
     }
 }
 
@@ -312,6 +318,18 @@ fn handle_tcp(buf: &[u8]) -> Result<String> {
         src_port,
         dst_port,
         ::hex::encode(&buf[20..])
+    ))
+}
+
+fn handle_icmp(version: IpVersion, buf: &[u8]) -> Result<String> {
+    let typ = buf[0];
+    let code = buf[1];
+
+    Ok(format!(
+        "({}, {}), remaining: {}",
+        typ,
+        code,
+        ::hex::encode(&buf[4..])
     ))
 }
 

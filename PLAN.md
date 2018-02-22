@@ -57,3 +57,9 @@ Only 16M addresses in 10.* to return. Return 60s
 TTL, hope nobody does 16M lookups in a minute?
 GC on 1/4th exhaustion, so we have a while to detect
 people using the wrong IP?
+
+### Icmp
+
+If an address we don't like arrives, immediately return ICMP errors.
+If any flags are wrong, can we return "fragmentation will happen"?
+Different code (semantics?) in v6.
