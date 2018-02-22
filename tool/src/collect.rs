@@ -128,7 +128,8 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
 
     // identification x2, flags, fragment, ttl, proto, checksum x2
     vec.extend(&[0, 0, 0, 0, 0x40, 1, 0, 0]);
-    vec.extend(&[192, 168, 33, 1]);
+    let old_to_address = &data[16..20];
+    vec.extend(old_to_address);
     vec.extend(&[192, 168, 33, 2]);
 
     // BORROW CHECKER
