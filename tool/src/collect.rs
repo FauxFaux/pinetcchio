@@ -24,9 +24,6 @@ const IP_PROTOCOL_UDP: u8 = 17;
 const IP_PROTOCOL_ICMP_V4: u8 = 1;
 const IP_PROTOCOL_ICMP_V6: u8 = 58;
 
-const ICMP_DEST_UNREACHABLE: u8 = 3;
-const ICMP_DEST_UNREACHABLE_HOST: u8 = 1;
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum IpVersion {
     Four,
@@ -38,7 +35,20 @@ enum Protocol {
     Tcp,
     Udp,
     IcmpV4,
-    IcmpV6
+    IcmpV6,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum IcmpResponse {
+    DestinationUnreachable,
+    KnownInvalid,
+}
+
+#[derive(Clone, Debug)]
+enum Immediate {
+    Icmp(IcmpResponse),
+    Drop(String),
+    Debug(String),
 }
 
 pub fn watch(tun: RawFd) -> Result<()> {
@@ -76,21 +86,15 @@ pub fn watch(tun: RawFd) -> Result<()> {
                     let read = tun_file.read(&mut buf)?;
                     let buf = &buf[..read];
                     write_pcap(&mut pcap, start, buf)?;
-                    println!("{:?}", handle(buf));
-                    write.push(match ip_version(buf[0])? {
-                        IpVersion::Four => {
-                            icmp(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf)
-                        }
-                        IpVersion::Six => {
-                            icmpv6(ICMP_DEST_UNREACHABLE, ICMP_DEST_UNREACHABLE_HOST, buf)
-                        }
-                    });
-                    poll.reregister(
-                        &tun_struct,
-                        TUN_TOKEN,
-                        mio::Ready::readable() | mio::Ready::writable(),
-                        mio::PollOpt::level(),
-                    )?;
+                    if let Some(pkt) = handle(buf)? {
+                        write.push(pkt);
+                        poll.reregister(
+                            &tun_struct,
+                            TUN_TOKEN,
+                            mio::Ready::readable() | mio::Ready::writable(),
+                            mio::PollOpt::level(),
+                        )?;
+                    }
                 }
 
                 if ev.readiness().contains(mio::Ready::writable()) {
@@ -120,7 +124,7 @@ fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8])
     Ok(())
 }
 
-fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
+fn icmp(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
     const IP_LEN: usize = 20;
     // ip, icmp, old ip (TODO: assumed to be short v4), first 64-bits of datagram
     const SIXTY_FOUR_BITS: usize = 8;
@@ -142,8 +146,11 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
 
     assert_eq!(IP_LEN, vec.len());
 
-    vec.push(ty);
-    vec.push(code);
+    vec.extend(&match resp {
+        IcmpResponse::DestinationUnreachable => [3, 1],
+        IcmpResponse::KnownInvalid => unimplemented!(),
+    });
+
     vec.extend(&[0, 0]); // checksum space
     vec.extend(&[0, 0, 0, 0]); // unused extra header space
     vec.extend(&data[..IP_LEN + SIXTY_FOUR_BITS]);
@@ -155,9 +162,8 @@ fn icmp(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
     vec
 }
 
-fn icmpv6(ty: u8, code: u8, data: &[u8]) -> Vec<u8> {
-    // TODO: totally wrong?
-    icmp(ty, code, data)
+fn icmpv6(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
+    unimplemented!()
 }
 
 fn internet_checksum(data: &[u8]) -> u16 {
@@ -192,14 +198,14 @@ fn ip_version(first_byte: u8) -> Result<IpVersion> {
     })
 }
 
-fn handle(buf: &[u8]) -> Result<String> {
+fn handle(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     match ip_version(buf[0])? {
         IpVersion::Four => handle_v4(buf),
         IpVersion::Six => handle_v6(buf),
     }
 }
 
-fn handle_v4(buf: &[u8]) -> Result<String> {
+fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     let ip_header_length = header_length(buf);
     ensure!(20 == ip_header_length, "unsupported header length");
     ensure!(buf.len() >= usize(ip_header_length), "truncated header");
@@ -236,16 +242,22 @@ fn handle_v4(buf: &[u8]) -> Result<String> {
 
     let buf = &buf[ip_header_length as usize..];
 
-    Ok(format!(
-        "ipv4 {:?} -> {:?} {:?} {:?}",
-        src,
-        dest,
-        protocol,
-        handle_protocol(protocol, buf),
-    ))
+    println!("ipv4 {:?} -> {:?} {:?}", src, dest, protocol,);
+
+    Ok(match handle_protocol(protocol, buf) {
+        Ok(Immediate::Icmp(resp)) => Some(icmp(resp, buf).into_boxed_slice()),
+        Ok(Immediate::Debug(msg)) => {
+            println!("replying denied: {}", msg);
+            Some(icmp(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+        },
+        other => {
+            println!("dropping: {:?}", other);
+            None
+        }
+    })
 }
 
-fn handle_v6(buf: &[u8]) -> Result<String> {
+fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     const V6_HEADER_LEN: usize = 40;
 
     ensure!(buf.len() >= V6_HEADER_LEN, "header is truncated");
@@ -271,16 +283,22 @@ fn handle_v6(buf: &[u8]) -> Result<String> {
 
     let buf = &buf[V6_HEADER_LEN..];
 
-    Ok(format!(
-        "ipv6 {:?} -> {:?} {:?} remainder: {:?}",
-        src,
-        dest,
-        protocol,
-        handle_protocol(protocol, buf),
-    ))
+    println!("ipv6 {:?} -> {:?} {:?}", src, dest, protocol,);
+
+    Ok(match handle_protocol(protocol, buf) {
+        Ok(Immediate::Icmp(resp)) => Some(icmpv6(resp, buf).into_boxed_slice()),
+        Ok(Immediate::Debug(msg)) => {
+            println!("replying denied: {}", msg);
+            Some(icmpv6(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+        },
+        other => {
+            println!("dropping: {:?}", other);
+            None
+        }
+    })
 }
 
-fn handle_protocol(protocol: Protocol, buf: &[u8]) -> Result<String> {
+fn handle_protocol(protocol: Protocol, buf: &[u8]) -> Result<Immediate> {
     match protocol {
         Protocol::Udp => handle_udp(buf),
         Protocol::Tcp => handle_tcp(buf),
@@ -289,7 +307,7 @@ fn handle_protocol(protocol: Protocol, buf: &[u8]) -> Result<String> {
     }
 }
 
-fn handle_udp(buf: &[u8]) -> Result<String> {
+fn handle_udp(buf: &[u8]) -> Result<Immediate> {
     let src_port = read_u16(buf);
     let dst_port = read_u16(&buf[2..]);
 
@@ -298,39 +316,43 @@ fn handle_udp(buf: &[u8]) -> Result<String> {
     let buf = &buf[8..];
 
     if 53 == dst_port {
-        return Ok(format!("src: {}, dns: {:?}", src_port, fdns::parse(buf)));
+        return Ok(Immediate::Debug(format!(
+            "src: {}, dns: {:?}",
+            src_port,
+            fdns::parse(buf)
+        )));
     }
 
-    Ok(format!(
+    Ok(Immediate::Debug(format!(
         "{} -> {}, remaining: {}",
         src_port,
         dst_port,
         ::hex::encode(buf)
-    ))
+    )))
 }
 
-fn handle_tcp(buf: &[u8]) -> Result<String> {
+fn handle_tcp(buf: &[u8]) -> Result<Immediate> {
     let src_port = read_u16(buf);
     let dst_port = read_u16(&buf[2..]);
 
-    Ok(format!(
+    Ok(Immediate::Debug(format!(
         "{} -> {}, remaining: {}",
         src_port,
         dst_port,
         ::hex::encode(&buf[20..])
-    ))
+    )))
 }
 
-fn handle_icmp(version: IpVersion, buf: &[u8]) -> Result<String> {
+fn handle_icmp(version: IpVersion, buf: &[u8]) -> Result<Immediate> {
     let typ = buf[0];
     let code = buf[1];
 
-    Ok(format!(
+    Ok(Immediate::Drop(format!(
         "({}, {}), remaining: {}",
         typ,
         code,
         ::hex::encode(&buf[4..])
-    ))
+    )))
 }
 
 fn read_u16(buf: &[u8]) -> u16 {
