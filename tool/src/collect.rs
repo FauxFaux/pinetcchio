@@ -126,9 +126,13 @@ fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8])
 
 fn icmp(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
     const IP_LEN: usize = 20;
-    // ip, icmp, old ip (TODO: assumed to be short v4), first 64-bits of datagram
-    const SIXTY_FOUR_BITS: usize = 8;
-    let total_len = IP_LEN + 8 + IP_LEN + SIXTY_FOUR_BITS;
+    const ICMP_LEN: usize = 8;
+    const MTU: usize = 576;
+    const PREFIX_LEN: usize = IP_LEN + ICMP_LEN;
+    const MAX_DATA: usize = MTU - PREFIX_LEN;
+    let saved_data_len = MAX_DATA.min(data.len());
+    let total_len = PREFIX_LEN + saved_data_len;
+
     let mut vec = Vec::with_capacity(total_len);
     vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
     vec.extend(&[0, 0]); // space for length
@@ -153,7 +157,7 @@ fn icmp(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
 
     vec.extend(&[0, 0]); // checksum space
     vec.extend(&[0, 0, 0, 0]); // unused extra header space
-    vec.extend(&data[..IP_LEN + SIXTY_FOUR_BITS]);
+    vec.extend(&data[..saved_data_len]);
 
     let checksum = internet_checksum(&vec[IP_LEN..]);
     BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
@@ -163,12 +167,48 @@ fn icmp(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
 }
 
 fn icmpv6(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
-    unimplemented!()
+    const IP_LEN: usize = 40;
+    const ICMP_LEN: usize = 8;
+    const MTU: usize = 1280;
+    const PREFIX_LEN: usize = IP_LEN + ICMP_LEN;
+    const MAX_DATA: usize = MTU - PREFIX_LEN;
+    let saved_data_len = MAX_DATA.min(data.len());
+    let total_len = PREFIX_LEN + saved_data_len;
+
+    let mut vec = Vec::with_capacity(total_len);
+    vec.extend(&[0x60, 0, 0, 0]); // version, traffic class, flow label
+    vec.extend(&[0, 0]); // space for payload length
+    BigEndian::write_u16(&mut vec[4..], u16(ICMP_LEN + saved_data_len).unwrap());
+
+    vec.push(IP_PROTOCOL_ICMP_V6);
+    vec.push(0x40); // hop limit / TTL
+    vec.extend(&data[24..40]); // source address
+    vec.extend(&data[8..24]); // dest address
+
+    assert_eq!(IP_LEN, vec.len());
+
+    vec.extend(&match resp {
+        IcmpResponse::DestinationUnreachable => [1, 3],
+        IcmpResponse::KnownInvalid => unimplemented!(),
+    });
+
+    vec.extend(&[0, 0]); // checksum space
+    vec.extend(&[0, 0, 0, 0]); // unused extra header space
+
+    let checksum = internet_add(&vec[8..40]) + internet_add(&vec[4..6])
+        + internet_add(&[0, 0, 0, IP_PROTOCOL_ICMP_V6]);
+    BigEndian::write_u16(&mut vec[IP_LEN + 2..], internet_finish(checksum));
+
+    vec.extend(&data[..saved_data_len]);
+
+    assert_eq!(total_len, vec.len());
+
+    vec
 }
 
-fn internet_checksum(data: &[u8]) -> u16 {
+fn internet_add(data: &[u8]) -> u64 {
     use itertools::Itertools;
-    let mut sum: u64 = 0;
+    let mut sum = 0;
     for (&a, &b) in data.iter().tuples() {
         sum += u64(a) * 0x100;
         sum += u64(b);
@@ -178,12 +218,20 @@ fn internet_checksum(data: &[u8]) -> u16 {
         sum += u64(data[data.len() - 1]) * 0x100;
     }
 
+    sum
+}
+
+fn internet_finish(mut sum: u64) -> u16 {
     // keep only the last 16 bits of the 32 bit calculated sum and add the carries
     while 0 != (sum >> 16) {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
 
     u16(sum).unwrap() ^ 0xffff
+}
+
+fn internet_checksum(data: &[u8]) -> u16 {
+    internet_finish(internet_add(data))
 }
 
 fn header_length(buf: &[u8]) -> u16 {
@@ -240,21 +288,21 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
 
     ensure!(buf.len() > 40, "too short for assumed tcp");
 
-    let buf = &buf[ip_header_length as usize..];
-
     println!("ipv4 {:?} -> {:?} {:?}", src, dest, protocol,);
 
-    Ok(match handle_protocol(protocol, buf) {
-        Ok(Immediate::Icmp(resp)) => Some(icmp(resp, buf).into_boxed_slice()),
-        Ok(Immediate::Debug(msg)) => {
-            println!("replying denied: {}", msg);
-            Some(icmp(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+    Ok(
+        match handle_protocol(protocol, &buf[ip_header_length as usize..]) {
+            Ok(Immediate::Icmp(resp)) => Some(icmp(resp, buf).into_boxed_slice()),
+            Ok(Immediate::Debug(msg)) => {
+                println!("replying denied: {}", msg);
+                Some(icmp(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+            }
+            other => {
+                println!("dropping: {:?}", other);
+                None
+            }
         },
-        other => {
-            println!("dropping: {:?}", other);
-            None
-        }
-    })
+    )
 }
 
 fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
@@ -281,16 +329,14 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     let src = read_v6(&buf[8..]);
     let dest = read_v6(&buf[24..]);
 
-    let buf = &buf[V6_HEADER_LEN..];
-
     println!("ipv6 {:?} -> {:?} {:?}", src, dest, protocol,);
 
-    Ok(match handle_protocol(protocol, buf) {
+    Ok(match handle_protocol(protocol, &buf[V6_HEADER_LEN..]) {
         Ok(Immediate::Icmp(resp)) => Some(icmpv6(resp, buf).into_boxed_slice()),
         Ok(Immediate::Debug(msg)) => {
             println!("replying denied: {}", msg);
             Some(icmpv6(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
-        },
+        }
         other => {
             println!("dropping: {:?}", other);
             None
