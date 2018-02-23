@@ -10,7 +10,6 @@ pub enum Response {
     KnownInvalid,
 }
 
-
 pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
     const IP_LEN: usize = 20;
     const ICMP_LEN: usize = 8;
@@ -82,13 +81,53 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
     vec.extend(&[0, 0]); // checksum space
     vec.extend(&[0, 0, 0, 0]); // unused extra header space
 
-    let checksum = csum::add(&vec[8..40]) + csum::add(&vec[4..6])
-        + csum::add(&[0, 0, 0, ::collect::IP_PROTOCOL_ICMP_V6]);
-    BigEndian::write_u16(&mut vec[IP_LEN + 2..], csum::finish(checksum));
-
     vec.extend(&data[..saved_data_len]);
+
+    let checksum = csum::add(&vec[8..40]) // source/dest address
+        + csum::add(&vec[4..6]) // packet length?
+        + csum::add(&[0, 0, 0, ::collect::IP_PROTOCOL_ICMP_V6]) // random zeros, and next header number
+        + csum::add(&vec[IP_LEN..]); // code and zeros and data
+
+    BigEndian::write_u16(&mut vec[IP_LEN + 2..], csum::finish(checksum));
 
     assert_eq!(total_len, vec.len());
 
     vec
+}
+
+#[cfg(test)]
+mod tests {
+    /// trying to make it match a real network packet; too much entropy and
+    ///  spec divergence; so I gave up
+    #[ignore]
+    #[test]
+    fn un4() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
+        let req = &[
+            /* 0000 */ 0x45, 0x00, 0x00, 0x3c, 0x40, 0xc8, 0x40, 0x00, // E..<@.@.
+            /* 0008 */ 0x40, 0x06, 0xad, 0xe7, 0xc0, 0xa8, 0x01, 0xeb, // @.......
+            /* 0010 */ 0x5e, 0x17, 0x2b, 0x62, 0x8f, 0x26, 0x34, 0x3d, // ^.+b.&4=
+            /* 0018 */ 0xd0, 0x56, 0x35, 0xe7, 0x00, 0x00, 0x00, 0x00, // .V5.....
+            /* 0020 */ 0xa0, 0x02, 0x72, 0x10, 0x4c, 0x3b, 0x00, 0x00, // ..r.L;..
+            /* 0028 */ 0x02, 0x04, 0x05, 0xb4, 0x04, 0x02, 0x08, 0x0a, // ........
+            /* 0030 */ 0x3d, 0x3c, 0x99, 0xdc, 0x00, 0x00, 0x00, 0x00, // =<......
+            /* 0038 */ 0x01, 0x03, 0x03, 0x0a,                         // ....
+        ];
+
+        let resp = &[
+            /* 0000 */ 0x45, 0x00, 0x00, 0x3c, 0x40, 0xc8, 0x40, 0x00, // E..<@.@.
+            /* 0008 */ 0x40, 0x06, 0xad, 0xe7, 0xc0, 0xa8, 0x01, 0xeb, // @.......
+            /* 0010 */ 0x5e, 0x17, 0x2b, 0x62, 0x8f, 0x26, 0x34, 0x3d, // ^.+b.&4=
+            /* 0018 */ 0xd0, 0x56, 0x35, 0xe7, 0x00, 0x00, 0x00, 0x00, // .V5.....
+            /* 0020 */ 0xa0, 0x02, 0x72, 0x10, 0x4c, 0x3b, 0x00, 0x00, // ..r.L;..
+            /* 0028 */ 0x02, 0x04, 0x05, 0xb4, 0x04, 0x02, 0x08, 0x0a, // ........
+            /* 0030 */ 0x3d, 0x3c, 0x99, 0xdc, 0x00, 0x00, 0x00, 0x00, // =<......
+            /* 0038 */ 0x01, 0x03, 0x03, 0x0au8,                       // ....
+        ][..];
+
+        assert_eq!(
+            resp,
+            super::v4(super::Response::DestinationUnreachable, req).as_slice()
+        );
+    }
 }
