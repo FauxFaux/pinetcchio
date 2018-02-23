@@ -13,8 +13,10 @@ extern crate namespace;
 extern crate pcap_file;
 
 mod collect;
+mod csum;
 mod dns;
 mod errors;
+mod icmp;
 
 use errors::*;
 

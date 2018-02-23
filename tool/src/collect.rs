@@ -15,14 +15,16 @@ use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
 
+use csum;
 use dns;
 use errors::*;
+use icmp;
 
 const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
 const IP_PROTOCOL_UDP: u8 = 17;
 const IP_PROTOCOL_ICMP_V4: u8 = 1;
-const IP_PROTOCOL_ICMP_V6: u8 = 58;
+pub const IP_PROTOCOL_ICMP_V6: u8 = 58;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum IpVersion {
@@ -38,15 +40,9 @@ enum Protocol {
     IcmpV6,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum IcmpResponse {
-    DestinationUnreachable,
-    KnownInvalid,
-}
-
 #[derive(Clone, Debug)]
 enum Immediate {
-    Icmp(IcmpResponse),
+    Icmp(icmp::Response),
     Drop(String),
     Debug(String),
 }
@@ -124,116 +120,6 @@ fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8])
     Ok(())
 }
 
-fn icmp(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
-    const IP_LEN: usize = 20;
-    const ICMP_LEN: usize = 8;
-    const MTU: usize = 576;
-    const PREFIX_LEN: usize = IP_LEN + ICMP_LEN;
-    const MAX_DATA: usize = MTU - PREFIX_LEN;
-    let saved_data_len = MAX_DATA.min(data.len());
-    let total_len = PREFIX_LEN + saved_data_len;
-
-    let mut vec = Vec::with_capacity(total_len);
-    vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
-    vec.extend(&[0, 0]); // space for length
-    BigEndian::write_u16(&mut vec[2..], u16(total_len).unwrap());
-
-    // identification x2, flags, fragment, ttl, proto, checksum x2
-    vec.extend(&[0, 0, 0, 0, 0x40, 1, 0, 0]);
-    let old_to_address = &data[16..20];
-    vec.extend(old_to_address);
-    vec.extend(&[192, 168, 33, 2]);
-
-    // BORROW CHECKER
-    let checksum = internet_checksum(&vec);
-    BigEndian::write_u16(&mut vec[10..], checksum);
-
-    assert_eq!(IP_LEN, vec.len());
-
-    vec.extend(&match resp {
-        IcmpResponse::DestinationUnreachable => [3, 1],
-        IcmpResponse::KnownInvalid => unimplemented!(),
-    });
-
-    vec.extend(&[0, 0]); // checksum space
-    vec.extend(&[0, 0, 0, 0]); // unused extra header space
-    vec.extend(&data[..saved_data_len]);
-
-    let checksum = internet_checksum(&vec[IP_LEN..]);
-    BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
-
-    assert_eq!(total_len, vec.len());
-    vec
-}
-
-fn icmpv6(resp: IcmpResponse, data: &[u8]) -> Vec<u8> {
-    const IP_LEN: usize = 40;
-    const ICMP_LEN: usize = 8;
-    const MTU: usize = 1280;
-    const PREFIX_LEN: usize = IP_LEN + ICMP_LEN;
-    const MAX_DATA: usize = MTU - PREFIX_LEN;
-    let saved_data_len = MAX_DATA.min(data.len());
-    let total_len = PREFIX_LEN + saved_data_len;
-
-    let mut vec = Vec::with_capacity(total_len);
-    vec.extend(&[0x60, 0, 0, 0]); // version, traffic class, flow label
-    vec.extend(&[0, 0]); // space for payload length
-    BigEndian::write_u16(&mut vec[4..], u16(ICMP_LEN + saved_data_len).unwrap());
-
-    vec.push(IP_PROTOCOL_ICMP_V6);
-    vec.push(0x40); // hop limit / TTL
-    vec.extend(&data[24..40]); // source address
-    vec.extend(&data[8..24]); // dest address
-
-    assert_eq!(IP_LEN, vec.len());
-
-    vec.extend(&match resp {
-        IcmpResponse::DestinationUnreachable => [1, 3],
-        IcmpResponse::KnownInvalid => unimplemented!(),
-    });
-
-    vec.extend(&[0, 0]); // checksum space
-    vec.extend(&[0, 0, 0, 0]); // unused extra header space
-
-    let checksum = internet_add(&vec[8..40]) + internet_add(&vec[4..6])
-        + internet_add(&[0, 0, 0, IP_PROTOCOL_ICMP_V6]);
-    BigEndian::write_u16(&mut vec[IP_LEN + 2..], internet_finish(checksum));
-
-    vec.extend(&data[..saved_data_len]);
-
-    assert_eq!(total_len, vec.len());
-
-    vec
-}
-
-fn internet_add(data: &[u8]) -> u64 {
-    use itertools::Itertools;
-    let mut sum = 0;
-    for (&a, &b) in data.iter().tuples() {
-        sum += u64(a) * 0x100;
-        sum += u64(b);
-    }
-
-    if data.len() % 2 == 1 {
-        sum += u64(data[data.len() - 1]) * 0x100;
-    }
-
-    sum
-}
-
-fn internet_finish(mut sum: u64) -> u16 {
-    // keep only the last 16 bits of the 32 bit calculated sum and add the carries
-    while 0 != (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    u16(sum).unwrap() ^ 0xffff
-}
-
-fn internet_checksum(data: &[u8]) -> u16 {
-    internet_finish(internet_add(data))
-}
-
 fn header_length(buf: &[u8]) -> u16 {
     u16::from(buf[0] & 0x0f) * 32 / 8
 }
@@ -292,10 +178,10 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
 
     Ok(
         match handle_protocol(protocol, &buf[ip_header_length as usize..]) {
-            Ok(Immediate::Icmp(resp)) => Some(icmp(resp, buf).into_boxed_slice()),
+            Ok(Immediate::Icmp(resp)) => Some(icmp::v4(resp, buf).into_boxed_slice()),
             Ok(Immediate::Debug(msg)) => {
                 println!("replying denied: {}", msg);
-                Some(icmp(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+                Some(icmp::v4(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
             }
             other => {
                 println!("dropping: {:?}", other);
@@ -332,10 +218,10 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     println!("ipv6 {:?} -> {:?} {:?}", src, dest, protocol,);
 
     Ok(match handle_protocol(protocol, &buf[V6_HEADER_LEN..]) {
-        Ok(Immediate::Icmp(resp)) => Some(icmpv6(resp, buf).into_boxed_slice()),
+        Ok(Immediate::Icmp(resp)) => Some(icmp::v6(resp, buf).into_boxed_slice()),
         Ok(Immediate::Debug(msg)) => {
             println!("replying denied: {}", msg);
-            Some(icmpv6(IcmpResponse::DestinationUnreachable, buf).into_boxed_slice())
+            Some(icmp::v6(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
         }
         other => {
             println!("dropping: {:?}", other);
