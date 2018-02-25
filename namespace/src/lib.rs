@@ -198,11 +198,8 @@ fn setup_addresses(
         let gateway_addr = netlink::Address::from_bytes_inet(family, gateway_addr)
             .chain_err(|| "translating gateway address")?;
 
-        if let Err(e) = nl.add_route(family, if_index, &gateway_addr)
-            .chain_err(|| "adding route")
-        {
-            println!("couldn't add route; meh: {:?}", e);
-        }
+        nl.add_route(family, if_index, &gateway_addr)
+            .chain_err(|| "adding route")?;
     }
 
     Ok(())

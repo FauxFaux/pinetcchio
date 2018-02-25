@@ -166,7 +166,7 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
         IP_PROTOCOL_TCP => Protocol::Tcp,
         IP_PROTOCOL_UDP => Protocol::Udp,
         protocol => {
-            println!("unsupported protocol number: {}", protocol);
+            warn!("unsupported protocol number (untested icmp): {}", protocol);
             return Ok(Some(
                 icmp::v6(icmp::Response::UnknownProtocol { offset: 9 }, buf).into_boxed_slice(),
             ));
@@ -178,17 +178,17 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
 
     ensure!(buf.len() > 40, "too short for assumed tcp");
 
-    println!("ipv4 {:?} -> {:?} {:?}", src, dest, protocol,);
+    info!("ipv4 {:?} -> {:?} {:?}", src, dest, protocol,);
 
     Ok(
         match handle_protocol(protocol, &buf[ip_header_length as usize..]) {
             Ok(Immediate::Icmp(resp)) => Some(icmp::v4(resp, buf).into_boxed_slice()),
             Ok(Immediate::Debug(msg)) => {
-                println!("replying denied: {}", msg);
+                info!("replying denied: {}", msg);
                 Some(icmp::v4(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
             }
             other => {
-                println!("dropping: {:?}", other);
+                info!("dropping: {:?}", other);
                 None
             }
         },
@@ -212,7 +212,7 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
         IP_PROTOCOL_UDP => Protocol::Udp,
         IP_PROTOCOL_ICMP_V6 => Protocol::IcmpV6,
         next_header => {
-            println!("unsupported next header: {}", next_header);
+            warn!("unsupported next header (untested icmp): {}", next_header);
             return Ok(Some(
                 icmp::v6(icmp::Response::UnknownProtocol { offset: 6 }, buf).into_boxed_slice(),
             ));
@@ -224,16 +224,16 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     let src = read_v6(&buf[8..]);
     let dest = read_v6(&buf[24..]);
 
-    println!("ipv6 {:?} -> {:?} {:?}", src, dest, protocol,);
+    info!("ipv6 {:?} -> {:?} {:?}", src, dest, protocol,);
 
     Ok(match handle_protocol(protocol, &buf[V6_HEADER_LEN..]) {
         Ok(Immediate::Icmp(resp)) => Some(icmp::v6(resp, buf).into_boxed_slice()),
         Ok(Immediate::Debug(msg)) => {
-            println!("replying denied: {}", msg);
+            info!("replying denied: {}", msg);
             Some(icmp::v6(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
         }
         other => {
-            println!("dropping: {:?}", other);
+            info!("dropping: {:?}", other);
             None
         }
     })

@@ -8,9 +8,12 @@ extern crate error_chain;
 extern crate fdns_parse;
 extern crate hex;
 extern crate itertools;
+#[macro_use]
+extern crate log;
 extern crate mio;
 extern crate namespace;
 extern crate pcap_file;
+extern crate pretty_env_logger;
 
 mod collect;
 mod csum;
@@ -21,6 +24,11 @@ mod icmp;
 use errors::*;
 
 fn run() -> Result<()> {
+    pretty_env_logger::formatted_builder()
+        .unwrap()
+        .filter(None, log::LevelFilter::Info)
+        .init();
+
     let (mut child_proc, tun_fd) = namespace::prepare()?;
 
     collect::watch(tun_fd)?;
