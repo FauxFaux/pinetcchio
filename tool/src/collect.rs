@@ -140,27 +140,54 @@ fn handle(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
 
 fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     let ip_header_length = header_length(buf);
-    ensure!(20 == ip_header_length, "unsupported header length");
-    ensure!(buf.len() >= usize(ip_header_length), "truncated header");
+    if 20 != ip_header_length || buf.len() < usize(ip_header_length) {
+        error!(
+            "truncated packet (or ipv4 extension headers, lol) (len: {})",
+            buf.len()
+        );
+
+        return Ok(Some(
+            icmp::v4(icmp::Response::InvalidLength { offset: 0 }, buf).into_boxed_slice(),
+        ));
+    }
 
     // buf[1]: DSCP / ECN: unsupported
 
     let ip_total_length = read_u16(&buf[2..]);
-    ensure!(
-        usize(ip_total_length) == buf.len(),
-        "ip total length violation, actual: {}, stated: {}",
-        buf.len(),
-        ip_total_length
-    );
+    if usize(ip_total_length) != buf.len() {
+        error!(
+            "ip total length violation, actual: {}, stated: {}",
+            buf.len(),
+            ip_total_length
+        );
+
+        return Ok(Some(
+            icmp::v4(icmp::Response::InvalidLength { offset: 2 }, buf).into_boxed_slice(),
+        ));
+    }
 
     // buf[4..5]: identification (ignored)
 
-    ensure!(
-        IP_FLAG_DONT_FRAGMENT == buf[6] & IP_FLAG_DONT_FRAGMENT,
-        "don't fragment"
-    );
-    // buf[6..7]: fragmentation (ignored)
-    // buf[8]: ttl (ignored)
+    {
+        // flags / fragmentation must be unset, except the don't fragment flag,
+        // which is normally set, but e.g. traceroute unsets
+        // buf[6..7]: flags/fragmentation
+
+        let mut flags = buf[6];
+        flags &= !IP_FLAG_DONT_FRAGMENT;
+        if 0 != flags || 0 != buf[7] {
+            return Ok(Some(
+                icmp::v4(icmp::Response::InvalidParameter { offset: 6 }, buf).into_boxed_slice(),
+            ));
+        }
+
+        // buf[8]: ttl (ignored)
+        if buf[8] == 0 {
+            return Ok(Some(
+                icmp::v4(icmp::Response::InvalidParameter { offset: 8 }, buf).into_boxed_slice(),
+            ));
+        }
+    }
 
     let protocol = match buf[9] {
         IP_PROTOCOL_TCP => Protocol::Tcp,
@@ -185,7 +212,7 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
             Ok(Immediate::Icmp(resp)) => Some(icmp::v4(resp, buf).into_boxed_slice()),
             Ok(Immediate::Debug(msg)) => {
                 info!("replying denied: {}", msg);
-                Some(icmp::v4(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
+                Some(icmp::v4(icmp::Response::DestinationHostUnreachable, buf).into_boxed_slice())
             }
             other => {
                 info!("dropping: {:?}", other);
@@ -230,7 +257,7 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
         Ok(Immediate::Icmp(resp)) => Some(icmp::v6(resp, buf).into_boxed_slice()),
         Ok(Immediate::Debug(msg)) => {
             info!("replying denied: {}", msg);
-            Some(icmp::v6(icmp::Response::DestinationUnreachable, buf).into_boxed_slice())
+            Some(icmp::v6(icmp::Response::DestinationHostUnreachable, buf).into_boxed_slice())
         }
         other => {
             info!("dropping: {:?}", other);

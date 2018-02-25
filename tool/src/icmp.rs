@@ -5,10 +5,24 @@ use cast::u8;
 
 use csum;
 
+/// Abstracting over icmpv4/icmpv6, but not very well;
+/// under the assumption that someone will eventually want an offset
+/// into a non-standard packet, but they probably won't.
+///
+/// Mapping onto "parameter problem" is especially confusing:
+/// icmpv4: (12, 0): any problem except length
+/// icmpv4: (12, 1): problems with extended headers (uncommon)
+/// icmpv4: (12, 2): problem with either length
+///
+/// icmpv6:  (4, 0): any problem except:
+/// icmpv6:  (4, 1): next header unsupported
+/// icmpv6:  (4, 2): unrecognised option
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Response {
-    DestinationUnreachable,
+    DestinationHostUnreachable,
     UnknownProtocol { offset: u32 },
+    InvalidLength { offset: u32 },
+    InvalidParameter { offset: u32 },
 }
 
 pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
@@ -38,8 +52,11 @@ pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
     assert_eq!(IP_LEN, vec.len());
 
     let (codes, extra) = match resp {
-        Response::DestinationUnreachable => ([3, 1], [0u8; 4]),
-        Response::UnknownProtocol { offset } => ([12, 0], [u8(offset).unwrap(), 0, 0, 0]),
+        Response::DestinationHostUnreachable => ([3, 1], [0u8; 4]),
+        Response::UnknownProtocol { offset } | Response::InvalidParameter { offset } => {
+            ([12, 0], [u8(offset).unwrap(), 0, 0, 0])
+        }
+        Response::InvalidLength { offset } => ([12, 2], [u8(offset).unwrap(), 0, 0, 0]),
     };
 
     vec.extend(&codes);
@@ -76,11 +93,10 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
     assert_eq!(IP_LEN, vec.len());
 
     let (code, extra) = match resp {
-        Response::DestinationUnreachable => ([1, 3], [0, 0, 0, 0]),
-        Response::UnknownProtocol { offset } => {
-            let mut bytes = [0u8; 4];
-            BigEndian::write_u32(&mut bytes, offset);
-            ([12, 0], bytes)
+        Response::DestinationHostUnreachable => ([1, 3], [0, 0, 0, 0]),
+        Response::UnknownProtocol { offset } => ([4, 1], u32_array(offset)),
+        Response::InvalidLength { offset } | Response::InvalidParameter { offset } => {
+            ([4, 0], u32_array(offset))
         }
     };
 
@@ -100,6 +116,12 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
     assert_eq!(total_len, vec.len());
 
     vec
+}
+
+fn u32_array(val: u32) -> [u8; 4] {
+    let mut bytes = [0u8; 4];
+    BigEndian::write_u32(&mut bytes, val);
+    bytes
 }
 
 #[cfg(test)]
@@ -134,7 +156,7 @@ mod tests {
 
         assert_eq!(
             resp,
-            super::v4(super::Response::DestinationUnreachable, req).as_slice()
+            super::v4(super::Response::DestinationHostUnreachable, req).as_slice()
         );
     }
 }
