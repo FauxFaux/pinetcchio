@@ -15,7 +15,6 @@ use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
 
-use csum;
 use dns;
 use errors::*;
 use icmp;
@@ -166,7 +165,12 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
     let protocol = match buf[9] {
         IP_PROTOCOL_TCP => Protocol::Tcp,
         IP_PROTOCOL_UDP => Protocol::Udp,
-        protocol => bail!("unsupported protocol number: {}", protocol),
+        protocol => {
+            println!("unsupported protocol number: {}", protocol);
+            return Ok(Some(
+                icmp::v6(icmp::Response::UnknownProtocol { offset: 9 }, buf).into_boxed_slice(),
+            ));
+        }
     };
 
     let src = read_v4(&buf[12..]);
@@ -207,7 +211,12 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
         IP_PROTOCOL_TCP => Protocol::Tcp,
         IP_PROTOCOL_UDP => Protocol::Udp,
         IP_PROTOCOL_ICMP_V6 => Protocol::IcmpV6,
-        next_header => bail!("unsupported next header number: {}", next_header),
+        next_header => {
+            println!("unsupported next header: {}", next_header);
+            return Ok(Some(
+                icmp::v6(icmp::Response::UnknownProtocol { offset: 6 }, buf).into_boxed_slice(),
+            ));
+        }
     };
 
     // buf[7]: hop limit (ignored)

@@ -1,13 +1,14 @@
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::u16;
+use cast::u8;
 
 use csum;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Response {
     DestinationUnreachable,
-    KnownInvalid,
+    UnknownProtocol { offset: u32 },
 }
 
 pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
@@ -36,13 +37,14 @@ pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
 
     assert_eq!(IP_LEN, vec.len());
 
-    vec.extend(&match resp {
-        Response::DestinationUnreachable => [3, 1],
-        Response::KnownInvalid => unimplemented!(),
-    });
+    let (codes, extra) = match resp {
+        Response::DestinationUnreachable => ([3, 1], [0u8; 4]),
+        Response::UnknownProtocol { offset } => ([12, 0], [u8(offset).unwrap(), 0, 0, 0]),
+    };
 
+    vec.extend(&codes);
     vec.extend(&[0, 0]); // checksum space
-    vec.extend(&[0, 0, 0, 0]); // unused extra header space
+    vec.extend(&extra); // unused extra header space
     vec.extend(&data[..saved_data_len]);
 
     let checksum = csum::csum(&vec[IP_LEN..]);
@@ -73,13 +75,18 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
 
     assert_eq!(IP_LEN, vec.len());
 
-    vec.extend(&match resp {
-        Response::DestinationUnreachable => [1, 3],
-        Response::KnownInvalid => unimplemented!(),
-    });
+    let (code, extra) = match resp {
+        Response::DestinationUnreachable => ([1, 3], [0, 0, 0, 0]),
+        Response::UnknownProtocol { offset } => {
+            let mut bytes = [0u8; 4];
+            BigEndian::write_u32(&mut bytes, offset);
+            ([12, 0], bytes)
+        }
+    };
 
+    vec.extend(&code);
     vec.extend(&[0, 0]); // checksum space
-    vec.extend(&[0, 0, 0, 0]); // unused extra header space
+    vec.extend(&extra); // unused extra header space
 
     vec.extend(&data[..saved_data_len]);
 
