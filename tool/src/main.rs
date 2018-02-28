@@ -5,7 +5,7 @@ extern crate byteorder;
 extern crate cast;
 #[macro_use]
 extern crate error_chain;
-extern crate fdns_parse;
+extern crate fdns_format;
 extern crate hex;
 extern crate itertools;
 #[macro_use]

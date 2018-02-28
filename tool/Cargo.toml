@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Chris West (Faux) <git@goeswhere.com>"]
 
 [dependencies]
-fdns-parse = { path = "../../fdns/parse" }
+fdns-format = { path = "../../fdns/format" }
 namespace = { path = "../namespace" }
 
 byteorder = "1"

@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::*;
-use fdns_parse::parse as fdns;
+use fdns_format::parse as fdns;
 use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
