@@ -9,20 +9,24 @@ use std::time::SystemTime;
 
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
+use byteorder::WriteBytesExt;
 use cast::*;
-use fdns_format::parse as fdns;
+use fdns_format as fdns;
 use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
+use rand;
+use rand::Rng;
 
 use dns;
 use errors::*;
 use icmp;
+use ip;
 
 const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
 const IP_PROTOCOL_UDP: u8 = 17;
-const IP_PROTOCOL_ICMP_V4: u8 = 1;
+pub const IP_PROTOCOL_ICMP_V4: u8 = 1;
 pub const IP_PROTOCOL_ICMP_V6: u8 = 58;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -41,6 +45,7 @@ enum Protocol {
 
 #[derive(Clone, Debug)]
 enum Immediate {
+    Response(Vec<u8>),
     Icmp(icmp::Response),
     Drop(String),
     Debug(String),
@@ -214,8 +219,20 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
                 info!("replying denied: {}", msg);
                 Some(icmp::v4(icmp::Response::DestinationHostUnreachable, buf).into_boxed_slice())
             }
-            other => {
-                info!("dropping: {:?}", other);
+            Ok(Immediate::Response(data)) => {
+                info!("replying with explicit {} byte response", data.len());
+                Some(
+                    ip::v4_response(&dest.octets(), &src.octets(), IP_PROTOCOL_UDP, |v| {
+                        v.extend(data)
+                    }).into_boxed_slice(),
+                )
+            }
+            Ok(Immediate::Drop(msg)) => {
+                info!("intentionally dropping: {}", msg);
+                None
+            }
+            Err(e) => {
+                error!("dropping due to error: {:?}", e);
                 None
             }
         },
@@ -259,8 +276,16 @@ fn handle_v6(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
             info!("replying denied: {}", msg);
             Some(icmp::v6(icmp::Response::DestinationHostUnreachable, buf).into_boxed_slice())
         }
-        other => {
-            info!("dropping: {:?}", other);
+        Ok(Immediate::Response(data)) => {
+            // TODO: olol ip
+            Some(data.into_boxed_slice())
+        }
+        Ok(Immediate::Drop(msg)) => {
+            info!("intentionally dropping: {}", msg);
+            None
+        }
+        Err(e) => {
+            error!("dropping due to error: {:?}", e);
             None
         }
     })
@@ -284,11 +309,33 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
     let buf = &buf[8..];
 
     if 53 == dst_port {
-        return Ok(Immediate::Debug(format!(
-            "src: {}, dns: {:?}",
-            src_port,
-            fdns::parse(buf)
-        )));
+        return Ok(match fdns::parse::parse(buf) {
+            Ok(pkt) => {
+                let question = &pkt.questions[0];
+                Immediate::Response(udp(
+                    dst_port,
+                    src_port,
+                    &fdns::gen::Builder::response_to(pkt.transaction_id)
+                        .error(fdns::RCode::NoError)
+                        .set_query(Some(fdns::gen::Question::new(
+                            String::from_utf8_lossy(&pkt.decode_label(question.label)?).to_string(),
+                            question.req_type,
+                            question.req_class,
+                        )))
+                        .build(),
+                ))
+            }
+            Err(e) => {
+                warn!("src: {}, dns packet decoding failed: {:?}", src_port, e);
+                Immediate::Response(udp(
+                    dst_port,
+                    src_port,
+                    &fdns::gen::Builder::response_to(BigEndian::read_u16(buf))
+                        .error(fdns::RCode::FormatError)
+                        .build(),
+                ))
+            }
+        });
     }
 
     Ok(Immediate::Debug(format!(
@@ -297,6 +344,19 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
         dst_port,
         ::hex::encode(buf)
     )))
+}
+
+fn udp(src: u16, dest: u16, contents: &[u8]) -> Vec<u8> {
+    let mut ret = Vec::with_capacity(8 + contents.len());
+    ret.write_u16::<BigEndian>(src).expect("writing to vec");
+    ret.write_u16::<BigEndian>(dest).expect("writing to vec");
+    ret.write_u16::<BigEndian>(u16(8 + contents.len()).expect("generated overlong packet"))
+        .expect("writing to vec");
+
+    ret.extend(&[0, 0]); // checksum optional in ipv4
+    ret.extend(contents);
+
+    ret
 }
 
 fn handle_tcp(buf: &[u8]) -> Result<Immediate> {

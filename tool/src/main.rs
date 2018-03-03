@@ -14,12 +14,14 @@ extern crate mio;
 extern crate namespace;
 extern crate pcap_file;
 extern crate pretty_env_logger;
+extern crate rand;
 
 mod collect;
 mod csum;
 mod dns;
 mod errors;
 mod icmp;
+mod ip;
 
 use errors::*;
 

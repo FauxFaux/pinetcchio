@@ -4,6 +4,7 @@ use cast::u16;
 use cast::u8;
 
 use csum;
+use ip;
 
 /// Abstracting over icmpv4/icmpv6, but not very well;
 /// under the assumption that someone will eventually want an offset
@@ -32,43 +33,31 @@ pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
     const PREFIX_LEN: usize = IP_LEN + ICMP_LEN;
     const MAX_DATA: usize = MTU - PREFIX_LEN;
     let saved_data_len = MAX_DATA.min(data.len());
-    let total_len = PREFIX_LEN + saved_data_len;
 
-    let mut vec = Vec::with_capacity(total_len);
-    vec.extend(&[0x45, 0xc0]); // ip version, flags, ecn, ..
-    vec.extend(&[0, 0]); // space for length
-    BigEndian::write_u16(&mut vec[2..], u16(total_len).unwrap());
-
-    // identification x2, flags, fragment, ttl, proto, checksum x2
-    vec.extend(&[0, 0, 0, 0, 0x40, 1, 0, 0]);
     let old_to_address = &data[16..20];
-    vec.extend(old_to_address);
-    vec.extend(&[192, 168, 33, 2]);
 
-    // BORROW CHECKER
-    let checksum = csum::csum(&vec);
-    BigEndian::write_u16(&mut vec[10..], checksum);
+    ip::v4_response(
+        &[192, 168, 33, 2],
+        old_to_address,
+        ::collect::IP_PROTOCOL_ICMP_V4,
+        |vec| {
+            let (codes, extra) = match resp {
+                Response::DestinationHostUnreachable => ([3, 1], [0u8; 4]),
+                Response::UnknownProtocol { offset } | Response::InvalidParameter { offset } => {
+                    ([12, 0], [u8(offset).unwrap(), 0, 0, 0])
+                }
+                Response::InvalidLength { offset } => ([12, 2], [u8(offset).unwrap(), 0, 0, 0]),
+            };
 
-    assert_eq!(IP_LEN, vec.len());
+            vec.extend(&codes);
+            vec.extend(&[0, 0]); // checksum space
+            vec.extend(&extra); // unused extra header space
+            vec.extend(&data[..saved_data_len]);
 
-    let (codes, extra) = match resp {
-        Response::DestinationHostUnreachable => ([3, 1], [0u8; 4]),
-        Response::UnknownProtocol { offset } | Response::InvalidParameter { offset } => {
-            ([12, 0], [u8(offset).unwrap(), 0, 0, 0])
-        }
-        Response::InvalidLength { offset } => ([12, 2], [u8(offset).unwrap(), 0, 0, 0]),
-    };
-
-    vec.extend(&codes);
-    vec.extend(&[0, 0]); // checksum space
-    vec.extend(&extra); // unused extra header space
-    vec.extend(&data[..saved_data_len]);
-
-    let checksum = csum::csum(&vec[IP_LEN..]);
-    BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
-
-    assert_eq!(total_len, vec.len());
-    vec
+            let checksum = csum::csum(&vec[IP_LEN..]);
+            BigEndian::write_u16(&mut vec[IP_LEN + 2..], checksum);
+        },
+    )
 }
 
 pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
