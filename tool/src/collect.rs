@@ -15,8 +15,6 @@ use fdns_format as fdns;
 use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
-use rand;
-use rand::Rng;
 
 use dns;
 use errors::*;
@@ -312,17 +310,23 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
         return Ok(match fdns::parse::parse(buf) {
             Ok(pkt) => {
                 let question = &pkt.questions[0];
+                let question = fdns::gen::Question::new(
+                    String::from_utf8_lossy(&pkt.decode_label(question.label)?).to_string(),
+                    question.req_type,
+                    question.req_class,
+                );
                 Immediate::Response(udp(
                     dst_port,
                     src_port,
                     &fdns::gen::Builder::response_to(pkt.transaction_id)
                         .error(fdns::RCode::NoError)
-                        .set_query(Some(fdns::gen::Question::new(
-                            String::from_utf8_lossy(&pkt.decode_label(question.label)?).to_string(),
-                            question.req_type,
-                            question.req_class,
-                        )))
-                        .build(),
+                        .set_query(Some(question.clone()))
+                        .add_answer(fdns::gen::Rr {
+                            question,
+                            ttl: 60,
+                            data: vec![1, 2, 3, 4],
+                        })
+                        .build()?,
                 ))
             }
             Err(e) => {
@@ -332,7 +336,7 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
                     src_port,
                     &fdns::gen::Builder::response_to(BigEndian::read_u16(buf))
                         .error(fdns::RCode::FormatError)
-                        .build(),
+                        .build()?,
                 ))
             }
         });

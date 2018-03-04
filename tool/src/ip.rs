@@ -1,6 +1,5 @@
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
-use byteorder::WriteBytesExt;
 use cast::u16;
 
 use csum;
