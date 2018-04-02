@@ -17,13 +17,13 @@ use std::process;
 
 use std::io::Write;
 use std::net::Ipv6Addr;
-use std::os::unix::process::CommandExt;
 use std::os::unix::io::RawFd;
+use std::os::unix::process::CommandExt;
 
 use rand::Rng;
 
-pub use errors::*;
 use bind::OwnedFd;
+pub use errors::*;
 
 pub fn prepare() -> Result<(std::process::Child, RawFd)> {
     use nix::sys::socket::*;

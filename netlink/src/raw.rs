@@ -1,14 +1,14 @@
 use libc::c_char;
 use libc::c_int;
-use libc::size_t;
 use libc::c_void;
+use libc::size_t;
+
+pub use libc::AF_INET;
+pub use libc::AF_INET6;
 
 pub type NlSock = *mut c_void;
 pub type NlCache = *mut c_void;
 pub type NlAddr = *mut c_void;
-
-pub use libc::AF_INET;
-pub use libc::AF_INET6;
 
 #[link(name = "netlink", kind = "static")]
 #[link(name = "nl-3")]

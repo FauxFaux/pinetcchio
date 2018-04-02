@@ -1,8 +1,8 @@
-use nix;
-use libc;
-
 use std::os::unix::io::RawFd;
 use std::str;
+
+use libc;
+use nix;
 
 use errors::*;
 
@@ -82,9 +82,9 @@ impl Drop for OwnedFd {
 }
 
 mod ioctl {
-    use libc;
     use super::RawFd;
     use super::Result;
+    use libc;
 
     const TUN_IOC_MAGIC: u8 = 'T' as u8;
     const TUN_IOC_SET_IFF: u8 = 202;
