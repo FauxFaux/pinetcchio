@@ -1,6 +1,3 @@
-// totally trivial methods; could inline if necessary
-#![feature(duration_extras)]
-
 extern crate byteorder;
 extern crate cast;
 #[macro_use]
