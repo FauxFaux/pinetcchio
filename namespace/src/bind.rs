@@ -1,10 +1,9 @@
 use std::os::unix::io::RawFd;
 use std::str;
 
-use libc;
-use nix;
-
-use crate::errors::*;
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 
 const IFF_TUN: libc::c_short = 0x0001;
 const IFF_NO_PI: libc::c_short = 0x1000;
@@ -25,13 +24,13 @@ pub fn tun_alloc() -> Result<Tun> {
             OFlag::O_RDWR | OFlag::O_CLOEXEC,
             nix::sys::stat::Mode::S_IRUSR,
         )
-        .chain_err(|| "opening /dev/net/tun")?,
+        .with_context(|| "opening /dev/net/tun")?,
     );
 
     let mut req = ioctl::IfReqFlags::default();
     req.ifr_flags = IFF_TUN | IFF_NO_PI;
 
-    unsafe { ioctl::tun_set_iff(tun.fd, &req) }.chain_err(|| "tun_set_iff")?;
+    unsafe { ioctl::tun_set_iff(tun.fd, &req) }.with_context(|| "tun_set_iff")?;
 
     raise_interface(&mut req)?;
 
@@ -86,7 +85,7 @@ impl Drop for OwnedFd {
 
 mod ioctl {
     use super::RawFd;
-    use super::Result;
+    use anyhow::Result;
     use libc;
 
     const TUN_IOC_MAGIC: u8 = 'T' as u8;

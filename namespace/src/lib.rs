@@ -1,10 +1,7 @@
 #[macro_use]
-extern crate error_chain;
-#[macro_use]
 extern crate nix;
 
 mod bind;
-mod errors;
 
 use std::fs;
 use std::io;
@@ -16,10 +13,12 @@ use std::net::Ipv6Addr;
 use std::os::unix::io::RawFd;
 use std::os::unix::process::CommandExt;
 
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 use rand::Rng;
 
 use crate::bind::OwnedFd;
-pub use crate::errors::*;
 
 pub fn prepare() -> Result<(std::process::Child, RawFd)> {
     use nix::sys::socket::*;
@@ -30,7 +29,7 @@ pub fn prepare() -> Result<(std::process::Child, RawFd)> {
         None,
         SockFlag::empty(),
     )
-    .chain_err(|| "creating socket pair")?;
+    .with_context(|| "creating socket pair")?;
 
     let to_namespace = OwnedFd::new(to_namespace);
     let to_host = OwnedFd::new(to_host);
@@ -98,7 +97,8 @@ pub fn inside(to_host: OwnedFd) -> Result<()> {
 
     {
         use nix::sched::*;
-        unshare(CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER).chain_err(|| "unsharing")?;
+        unshare(CloneFlags::CLONE_NEWNET | CloneFlags::CLONE_NEWUSER)
+            .with_context(|| "unsharing")?;
     }
 
     if true {
@@ -159,7 +159,7 @@ fn drop_setgroups() -> Result<()> {
             file.write_all(b"deny")?;
             Ok(())
         }
-        Err(e) => Err(Error::with_chain(e, "unknown error opening setgroups")),
+        Err(e) => Err(e).context(anyhow!("unknown error opening setgroups")),
     }
 }
 
@@ -170,11 +170,11 @@ fn setup_addresses(
     gateway_addr: &[u8],
     prefix_len: u8,
 ) -> Result<()> {
-    let mut nl = netlink::Netlink::new().chain_err(|| "creating netlink")?;
+    let mut nl = netlink::Netlink::new().with_context(|| "creating netlink")?;
 
     let if_index = nl
         .index_of_link_name(device)
-        .chain_err(|| "looking up interface index")?;
+        .with_context(|| "looking up interface index")?;
 
     let mut addr = netlink::Address::new()?;
 
@@ -182,22 +182,22 @@ fn setup_addresses(
 
     {
         let local_addr = netlink::Address::from_bytes_inet(family, local_addr)
-            .chain_err(|| "translating local address")?;
+            .with_context(|| "translating local address")?;
 
         addr.set_local(&local_addr)
-            .chain_err(|| "setting local address")?;
+            .with_context(|| "setting local address")?;
     }
 
     addr.set_prefix_len(prefix_len);
 
-    nl.add_address(&addr).chain_err(|| "adding address")?;
+    nl.add_address(&addr).with_context(|| "adding address")?;
 
     {
         let gateway_addr = netlink::Address::from_bytes_inet(family, gateway_addr)
-            .chain_err(|| "translating gateway address")?;
+            .with_context(|| "translating gateway address")?;
 
         nl.add_route(family, if_index, &gateway_addr)
-            .chain_err(|| "adding route")?;
+            .with_context(|| "adding route")?;
     }
 
     Ok(())

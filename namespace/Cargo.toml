@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 netlink = { path = "../netlink" }
 
-error-chain = "0.11"
+anyhow = "1"
 exec = "0.3"
 libc = "0.2"
 nix = "0.10"

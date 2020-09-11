@@ -7,6 +7,9 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::io::RawFd;
 use std::time::SystemTime;
 
+use anyhow::bail;
+use anyhow::ensure;
+use anyhow::Result;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use byteorder::WriteBytesExt;
@@ -17,7 +20,6 @@ use pcap_file;
 use pcap_file::PcapWriter;
 
 use crate::dns;
-use crate::errors::*;
 use crate::icmp;
 use crate::ip;
 
@@ -71,7 +73,8 @@ pub fn watch(tun: RawFd) -> Result<()> {
     let mut pcap = PcapWriter::with_header(
         pcap_file::PcapHeader::with_datalink(pcap_file::DataLink::RAW),
         fs::File::create("all.pcap")?,
-    )?;
+    )
+    .expect("TODO: chaining issue");
     let start = SystemTime::now();
 
     loop {
@@ -118,7 +121,8 @@ pub fn watch(tun: RawFd) -> Result<()> {
 
 fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8]) -> Result<()> {
     let duration = SystemTime::now().duration_since(start)?;
-    pcap.write(u32(duration.as_secs())?, duration.subsec_micros(), buf)?;
+    pcap.write(u32(duration.as_secs())?, duration.subsec_micros(), buf)
+        .expect("TODO: chaining issue");
     Ok(())
 }
 

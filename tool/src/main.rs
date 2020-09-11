@@ -1,18 +1,17 @@
 #[macro_use]
-extern crate error_chain;
-#[macro_use]
 extern crate log;
+
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 
 mod collect;
 mod csum;
 mod dns;
-mod errors;
 mod icmp;
 mod ip;
 
-use crate::errors::*;
-
-fn run() -> Result<()> {
+fn main() -> Result<()> {
     pretty_env_logger::formatted_builder()
         .unwrap()
         .filter(None, log::LevelFilter::Info)
@@ -25,5 +24,3 @@ fn run() -> Result<()> {
     child_proc.wait()?;
     Ok(())
 }
-
-quick_main!(run);
