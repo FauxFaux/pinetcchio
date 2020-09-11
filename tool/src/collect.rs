@@ -312,7 +312,11 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
             Ok(pkt) => {
                 let question = &pkt.questions[0];
                 let question = fdns::gen::Question::new(
-                    String::from_utf8_lossy(&pkt.decode_label(question.label)?).to_string(),
+                    String::from_utf8_lossy(
+                        &pkt.decode_label(question.label)
+                            .expect("TODO: chaining failure"),
+                    )
+                    .to_string(),
                     question.req_type,
                     question.req_class,
                 );
@@ -327,7 +331,8 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
                             ttl: 60,
                             data: vec![1, 2, 3, 4],
                         })
-                        .build()?,
+                        .build()
+                        .expect("TODO: chaining failure"),
                 ))
             }
             Err(e) => {
@@ -337,7 +342,8 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
                     src_port,
                     &fdns::gen::Builder::response_to(BigEndian::read_u16(buf))
                         .error(fdns::RCode::FormatError)
-                        .build()?,
+                        .build()
+                        .expect("TODO: chaining failure"),
                 ))
             }
         });
