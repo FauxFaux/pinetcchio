@@ -2,7 +2,7 @@ use byteorder::BigEndian;
 use byteorder::ByteOrder;
 use cast::u16;
 
-use csum;
+use crate::csum;
 
 pub fn v4_response<P>(src: &[u8], dest: &[u8], proto: u8, payload: P) -> Vec<u8>
 where

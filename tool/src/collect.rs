@@ -16,10 +16,10 @@ use mio;
 use pcap_file;
 use pcap_file::PcapWriter;
 
-use dns;
-use errors::*;
-use icmp;
-use ip;
+use crate::dns;
+use crate::errors::*;
+use crate::icmp;
+use crate::ip;
 
 const IP_FLAG_DONT_FRAGMENT: u8 = 1 << 6;
 const IP_PROTOCOL_TCP: u8 = 6;
@@ -66,7 +66,7 @@ pub fn watch(tun: RawFd) -> Result<()> {
     let mut tun_file = unsafe { fs::File::from_raw_fd(tun) };
 
     let mut events = mio::Events::with_capacity(1024);
-    let mut internal_resolver = dns::InternalResolver::default();
+    let _internal_resolver = dns::InternalResolver::default();
     let mut write = Vec::new();
     let mut pcap = PcapWriter::with_header(
         pcap_file::PcapHeader::with_datalink(pcap_file::DataLink::RAW),
@@ -382,7 +382,7 @@ fn handle_tcp(buf: &[u8]) -> Result<Immediate> {
     )))
 }
 
-fn handle_icmp(version: IpVersion, buf: &[u8]) -> Result<Immediate> {
+fn handle_icmp(_version: IpVersion, buf: &[u8]) -> Result<Immediate> {
     let typ = buf[0];
     let code = buf[1];
 

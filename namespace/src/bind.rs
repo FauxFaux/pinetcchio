@@ -4,7 +4,7 @@ use std::str;
 use libc;
 use nix;
 
-use errors::*;
+use crate::errors::*;
 
 const IFF_TUN: libc::c_short = 0x0001;
 const IFF_NO_PI: libc::c_short = 0x1000;
@@ -37,7 +37,7 @@ pub fn tun_alloc() -> Result<Tun> {
 
     Ok(Tun {
         name: str::from_utf8(&req.ifr_name)?
-            .trim_right_matches('\0')
+            .trim_end_matches('\0')
             .to_string(),
         fd: tun,
     })

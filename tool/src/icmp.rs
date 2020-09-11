@@ -3,8 +3,8 @@ use byteorder::ByteOrder;
 use cast::u16;
 use cast::u8;
 
-use csum;
-use ip;
+use crate::csum;
+use crate::ip;
 
 /// Abstracting over icmpv4/icmpv6, but not very well;
 /// under the assumption that someone will eventually want an offset
@@ -39,7 +39,7 @@ pub fn v4(resp: Response, data: &[u8]) -> Vec<u8> {
     ip::v4_response(
         &[192, 168, 33, 2],
         old_to_address,
-        ::collect::IP_PROTOCOL_ICMP_V4,
+        crate::collect::IP_PROTOCOL_ICMP_V4,
         |vec| {
             let (codes, extra) = match resp {
                 Response::DestinationHostUnreachable => ([3, 1], [0u8; 4]),
@@ -74,7 +74,7 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
     vec.extend(&[0, 0]); // space for payload length
     BigEndian::write_u16(&mut vec[4..], u16(ICMP_LEN + saved_data_len).unwrap());
 
-    vec.push(::collect::IP_PROTOCOL_ICMP_V6);
+    vec.push(crate::collect::IP_PROTOCOL_ICMP_V6);
     vec.push(0x40); // hop limit / TTL
     vec.extend(&data[24..40]); // source address
     vec.extend(&data[8..24]); // dest address
@@ -97,7 +97,7 @@ pub fn v6(resp: Response, data: &[u8]) -> Vec<u8> {
 
     let checksum = csum::add(&vec[8..40]) // source/dest address
         + csum::add(&vec[4..6]) // packet length?
-        + csum::add(&[0, 0, 0, ::collect::IP_PROTOCOL_ICMP_V6]) // random zeros, and next header number
+        + csum::add(&[0, 0, 0, crate::collect::IP_PROTOCOL_ICMP_V6]) // random zeros, and next header number
         + csum::add(&vec[IP_LEN..]); // code and zeros and data
 
     BigEndian::write_u16(&mut vec[IP_LEN + 2..], csum::finish(checksum));

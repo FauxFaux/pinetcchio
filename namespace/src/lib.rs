@@ -1,11 +1,7 @@
 #[macro_use]
 extern crate error_chain;
-extern crate exec;
-extern crate libc;
-extern crate netlink;
 #[macro_use]
 extern crate nix;
-extern crate rand;
 
 mod bind;
 mod errors;
@@ -22,8 +18,8 @@ use std::os::unix::process::CommandExt;
 
 use rand::Rng;
 
-use bind::OwnedFd;
-pub use errors::*;
+use crate::bind::OwnedFd;
+pub use crate::errors::*;
 
 pub fn prepare() -> Result<(std::process::Child, RawFd)> {
     use nix::sys::socket::*;

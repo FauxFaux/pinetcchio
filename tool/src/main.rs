@@ -1,17 +1,7 @@
-extern crate byteorder;
-extern crate cast;
 #[macro_use]
 extern crate error_chain;
-extern crate fdns_format;
-extern crate hex;
-extern crate itertools;
 #[macro_use]
 extern crate log;
-extern crate mio;
-extern crate namespace;
-extern crate pcap_file;
-extern crate pretty_env_logger;
-extern crate rand;
 
 mod collect;
 mod csum;
@@ -20,7 +10,7 @@ mod errors;
 mod icmp;
 mod ip;
 
-use errors::*;
+use crate::errors::*;
 
 fn run() -> Result<()> {
     pretty_env_logger::formatted_builder()
