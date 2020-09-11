@@ -50,11 +50,11 @@ pub fn prepare() -> Result<(std::process::Child, RawFd)> {
     close_stdin()?;
     mem::drop(to_host);
 
-    let mut space = CmsgSpace::<[RawFd; 1]>::new();
+    let mut space = cmsg_space!([RawFd; 1]);
     let msgs = recvmsg(to_namespace.fd, &[], Some(&mut space), MsgFlags::empty())?;
     let mut iter = msgs.cmsgs();
 
-    let child_tun = if let Some(ControlMessage::ScmRights(fds)) = iter.next() {
+    let child_tun = if let Some(ControlMessageOwned::ScmRights(fds)) = iter.next() {
         assert_eq!(1, fds.len());
         fds[0]
     } else {

@@ -11,5 +11,5 @@ netlink = { path = "../netlink" }
 anyhow = "1"
 exec = "0.3"
 libc = "0.2"
-nix = "0.10"
+nix = "0.18"
 rand = "0.7"

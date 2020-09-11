@@ -91,7 +91,7 @@ mod ioctl {
     const TUN_IOC_MAGIC: u8 = 'T' as u8;
     const TUN_IOC_SET_IFF: u8 = 202;
 
-    const TUNSETIFF: u64 = iow!(TUN_IOC_MAGIC, TUN_IOC_SET_IFF, 4);
+    const TUNSETIFF: u64 = request_code_write!(TUN_IOC_MAGIC, TUN_IOC_SET_IFF, 4);
 
     /// socket interface get flags
     const SIOCGIFFLAGS: u64 = 0x8913;
@@ -120,6 +120,6 @@ mod ioctl {
         Ok(())
     }
 
-    ioctl!(bad read sock_get_flags with SIOCGIFFLAGS; IfReqFlags);
-    ioctl!(bad write_ptr sock_set_flags with SIOCSIFFLAGS; IfReqFlags);
+    ioctl_read_bad!(sock_get_flags, SIOCGIFFLAGS, IfReqFlags);
+    ioctl_write_ptr_bad!(sock_set_flags, SIOCSIFFLAGS, IfReqFlags);
 }
