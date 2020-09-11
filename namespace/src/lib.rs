@@ -33,7 +33,8 @@ pub fn prepare() -> Result<(std::process::Child, RawFd)> {
         SockType::Datagram,
         None,
         SockFlag::empty(),
-    ).chain_err(|| "creating socket pair")?;
+    )
+    .chain_err(|| "creating socket pair")?;
 
     let to_namespace = OwnedFd::new(to_namespace);
     let to_host = OwnedFd::new(to_host);
@@ -175,7 +176,8 @@ fn setup_addresses(
 ) -> Result<()> {
     let mut nl = netlink::Netlink::new().chain_err(|| "creating netlink")?;
 
-    let if_index = nl.index_of_link_name(device)
+    let if_index = nl
+        .index_of_link_name(device)
         .chain_err(|| "looking up interface index")?;
 
     let mut addr = netlink::Address::new()?;

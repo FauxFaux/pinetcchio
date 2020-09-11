@@ -10,3 +10,7 @@ Do not look at this code. If you're lucky, it won't even compile.
 
 Private. Yes, this is a public repo with private code in it.
 
+
+## Deps
+
+`sai libnl-3-dev libnl-route-3-dev`

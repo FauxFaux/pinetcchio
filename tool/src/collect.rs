@@ -222,7 +222,8 @@ fn handle_v4(buf: &[u8]) -> Result<Option<Box<[u8]>>> {
                 Some(
                     ip::v4_response(&dest.octets(), &src.octets(), IP_PROTOCOL_UDP, |v| {
                         v.extend(data)
-                    }).into_boxed_slice(),
+                    })
+                    .into_boxed_slice(),
                 )
             }
             Ok(Immediate::Drop(msg)) => {
