@@ -13,7 +13,6 @@ mod ip;
 
 fn main() -> Result<()> {
     pretty_env_logger::formatted_builder()
-        .unwrap()
         .filter(None, log::LevelFilter::Info)
         .init();
 
