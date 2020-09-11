@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
@@ -71,10 +72,12 @@ pub fn watch(tun: RawFd) -> Result<()> {
     let _internal_resolver = dns::InternalResolver::default();
     let mut write = Vec::new();
     let mut pcap = PcapWriter::with_header(
-        pcap_file::PcapHeader::with_datalink(pcap_file::DataLink::RAW),
+        pcap_file::pcap::PcapHeader {
+            datalink: pcap_file::DataLink::RAW,
+            ..Default::default()
+        },
         fs::File::create("all.pcap")?,
-    )
-    .expect("TODO: chaining issue");
+    )?;
     let start = SystemTime::now();
 
     loop {
@@ -121,8 +124,13 @@ pub fn watch(tun: RawFd) -> Result<()> {
 
 fn write_pcap<W: Write>(pcap: &mut PcapWriter<W>, start: SystemTime, buf: &[u8]) -> Result<()> {
     let duration = SystemTime::now().duration_since(start)?;
-    pcap.write(u32(duration.as_secs())?, duration.subsec_micros(), buf)
-        .expect("TODO: chaining issue");
+    // TODO: real length
+    pcap.write(
+        u32(duration.as_secs())?,
+        duration.subsec_micros(),
+        buf,
+        u32::try_from(buf.len())?,
+    )?;
     Ok(())
 }
 
@@ -316,11 +324,7 @@ fn handle_udp(buf: &[u8]) -> Result<Immediate> {
             Ok(pkt) => {
                 let question = &pkt.questions[0];
                 let question = fdns::gen::Question::new(
-                    String::from_utf8_lossy(
-                        &pkt.decode_label(question.label)
-                            .expect("TODO: chaining failure"),
-                    )
-                    .to_string(),
+                    String::from_utf8_lossy(&pkt.decode_label(question.label)?).to_string(),
                     question.req_type,
                     question.req_class,
                 );
